@@ -1,0 +1,25 @@
+{
+  "name": "@local-code-agent/agent-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@local-code-agent/agent-specialists": "*",
+    "@local-code-agent/change-engine": "*",
+    "@local-code-agent/task-graph": "*",
+    "zod": "^4.4.3"
+  }
+}

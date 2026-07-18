@@ -1,0 +1,606 @@
+{
+  "name": "local-code-agent-vscode",
+  "displayName": "Local Code Agent",
+  "description": "Lokalny agent programistyczny dla VS Code, korzystający z Ollamy i bezpiecznych ChangeSetów.",
+  "version": "0.2.0",
+  "publisher": "local-code-agent",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "ollama",
+    "local",
+    "agent",
+    "ai",
+    "coding"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onView:localCodeAgent.chat",
+    "onCommand:localCodeAgent.open",
+    "onCommand:localCodeAgent.ask"
+  ],
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.test.json --noEmit --pretty false",
+    "test": "vitest run",
+    "vscode:test": "npm run build && tsx tests/integration/runTest.ts",
+    "package:vsix": "node -e \"require('node:fs').mkdirSync('../../artifacts',{recursive:true})\" && npm run build && vsce package --allow-missing-repository --no-dependencies --out ../../artifacts/local-code-agent-0.2.0.vsix"
+  },
+  "dependencies": {
+    "@local-code-agent/runtime-protocol": "*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.96.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.6.2",
+    "esbuild": "^0.28.1"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "localCodeAgent.open",
+        "title": "Local Code Agent: Otwórz"
+      },
+      {
+        "command": "localCodeAgent.ask",
+        "title": "Local Code Agent: Zapytaj"
+      },
+      {
+        "command": "localCodeAgent.askAboutSelection",
+        "title": "Local Code Agent: Zapytaj o zaznaczenie"
+      },
+      {
+        "command": "localCodeAgent.explainSelection",
+        "title": "Local Code Agent: Wyjaśnij zaznaczenie"
+      },
+      {
+        "command": "localCodeAgent.fixSelection",
+        "title": "Local Code Agent: Napraw zaznaczenie"
+      },
+      {
+        "command": "localCodeAgent.reviewActiveFile",
+        "title": "Local Code Agent: Przejrzyj aktywny plik"
+      },
+      {
+        "command": "localCodeAgent.planTask",
+        "title": "Local Code Agent: Zaplanuj zadanie"
+      },
+      {
+        "command": "localCodeAgent.editTask",
+        "title": "Local Code Agent: Przygotuj zmiany"
+      },
+      {
+        "command": "localCodeAgent.startAgentTask",
+        "title": "Local Code Agent: Uruchom zadanie Agent"
+      },
+      {
+        "command": "localCodeAgent.startOrchestratedTask",
+        "title": "Local Code Agent: Uruchom Orchestrated"
+      },
+      {
+        "command": "localCodeAgent.approveOrchestration",
+        "title": "Local Code Agent: Zatwierdź orkiestrację",
+        "icon": "$(check)"
+      },
+      {
+        "command": "localCodeAgent.rejectOrchestration",
+        "title": "Local Code Agent: Odrzuć orkiestrację",
+        "icon": "$(close)"
+      },
+      {
+        "command": "localCodeAgent.cancelTask",
+        "title": "Local Code Agent: Anuluj zadanie",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "localCodeAgent.previewChanges",
+        "title": "Local Code Agent: Podgląd zmian",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "localCodeAgent.applyChanges",
+        "title": "Local Code Agent: Zastosuj zmiany",
+        "icon": "$(check)"
+      },
+      {
+        "command": "localCodeAgent.rejectChanges",
+        "title": "Local Code Agent: Odrzuć zmiany",
+        "icon": "$(close)"
+      },
+      {
+        "command": "localCodeAgent.runVerification",
+        "title": "Local Code Agent: Uruchom weryfikację",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "localCodeAgent.showVerification",
+        "title": "Local Code Agent: Pokaż weryfikację"
+      },
+      {
+        "command": "localCodeAgent.showDiff",
+        "title": "Local Code Agent: Pokaż diff"
+      },
+      {
+        "command": "localCodeAgent.restoreCheckpoint",
+        "title": "Local Code Agent: Przywróć checkpoint"
+      },
+      {
+        "command": "localCodeAgent.restartRuntime",
+        "title": "Local Code Agent: Restartuj runtime",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "localCodeAgent.openSettings",
+        "title": "Local Code Agent: Otwórz ustawienia"
+      },
+      {
+        "command": "localCodeAgent.showLogs",
+        "title": "Local Code Agent: Pokaż logi"
+      },
+      {
+        "command": "localCodeAgent.runDoctor",
+        "title": "Local Code Agent: Doctor"
+      },
+      {
+        "command": "localCodeAgent.github.connect",
+        "title": "Local Code Agent: Connect GitHub"
+      },
+      {
+        "command": "localCodeAgent.github.disconnect",
+        "title": "Local Code Agent: Disconnect GitHub"
+      },
+      {
+        "command": "localCodeAgent.github.showAccount",
+        "title": "Local Code Agent: Show GitHub Account"
+      },
+      {
+        "command": "localCodeAgent.github.verifyRepository",
+        "title": "Local Code Agent: Verify GitHub Repository"
+      },
+      {
+        "command": "localCodeAgent.github.refresh",
+        "title": "Local Code Agent: Refresh GitHub",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "localCodeAgent.github.publishTask",
+        "title": "Local Code Agent: Publish Task Branch"
+      },
+      {
+        "command": "localCodeAgent.github.createDraftPullRequest",
+        "title": "Local Code Agent: Create Draft Pull Request"
+      },
+      {
+        "command": "localCodeAgent.github.refreshChecks",
+        "title": "Local Code Agent: Refresh Pull Request Checks"
+      },
+      {
+        "command": "localCodeAgent.github.openPullRequest",
+        "title": "Local Code Agent: Open Pull Request"
+      },
+      {
+        "command": "localCodeAgent.github.replyToReview",
+        "title": "Local Code Agent: Reply to Review"
+      },
+      {
+        "command": "localCodeAgent.github.resolveReviewThread",
+        "title": "Local Code Agent: Resolve Review Thread"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "localCodeAgent",
+          "title": "Local Code Agent",
+          "icon": "resources/agent.svg"
+        }
+      ]
+    },
+    "views": {
+      "localCodeAgent": [
+        {
+          "id": "localCodeAgent.chat",
+          "name": "Agent",
+          "type": "webview"
+        },
+        {
+          "id": "localCodeAgent.changes",
+          "name": "Zmiany"
+        },
+        {
+          "id": "localCodeAgent.checkpoints",
+          "name": "Checkpointy"
+        },
+        {
+          "id": "localCodeAgent.verification",
+          "name": "Weryfikacja"
+        },
+        {
+          "id": "localCodeAgent.history",
+          "name": "Historia"
+        },
+        {
+          "id": "localCodeAgent.orchestration",
+          "name": "Agent Orchestration"
+        },
+        {
+          "id": "localCodeAgent.github",
+          "name": "GitHub"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "localCodeAgent.askAboutSelection",
+          "when": "editorHasSelection",
+          "group": "localCodeAgent@1"
+        },
+        {
+          "command": "localCodeAgent.explainSelection",
+          "when": "editorHasSelection",
+          "group": "localCodeAgent@2"
+        },
+        {
+          "command": "localCodeAgent.fixSelection",
+          "when": "editorHasSelection && isWorkspaceTrusted",
+          "group": "localCodeAgent@3"
+        },
+        {
+          "command": "localCodeAgent.reviewActiveFile",
+          "group": "localCodeAgent@4"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "localCodeAgent.restartRuntime",
+          "when": "view == localCodeAgent.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localCodeAgent.cancelTask",
+          "when": "view == localCodeAgent.chat && localCodeAgent.taskActive",
+          "group": "navigation@2"
+        },
+        {
+          "command": "localCodeAgent.previewChanges",
+          "when": "view == localCodeAgent.changes",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localCodeAgent.runVerification",
+          "when": "view == localCodeAgent.verification",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localCodeAgent.github.refresh",
+          "when": "view == localCodeAgent.github",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localCodeAgent.approveOrchestration",
+          "when": "view == localCodeAgent.orchestration",
+          "group": "navigation@1"
+        },
+        {
+          "command": "localCodeAgent.rejectOrchestration",
+          "when": "view == localCodeAgent.orchestration",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "localCodeAgent.showDiff",
+          "when": "view == localCodeAgent.changes",
+          "group": "inline@1"
+        },
+        {
+          "command": "localCodeAgent.restoreCheckpoint",
+          "when": "view == localCodeAgent.checkpoints",
+          "group": "inline@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Local Code Agent",
+      "properties": {
+        "localCodeAgent.ollama.host": {
+          "type": "string",
+          "format": "uri",
+          "default": "http://127.0.0.1:11434",
+          "description": "Adres lokalnego serwera Ollama."
+        },
+        "localCodeAgent.ollama.model": {
+          "type": "string",
+          "default": "qwen3.5:9b",
+          "description": "Nazwa lokalnego modelu."
+        },
+        "localCodeAgent.ollama.contextLength": {
+          "type": "number",
+          "default": 32768,
+          "minimum": 1024,
+          "maximum": 2000000
+        },
+        "localCodeAgent.ollama.temperature": {
+          "type": "number",
+          "default": 0.1,
+          "minimum": 0,
+          "maximum": 2
+        },
+        "localCodeAgent.runtime.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Uruchamiaj runtime przy aktywacji rozszerzenia."
+        },
+        "localCodeAgent.runtime.restartOnCrash": {
+          "type": "boolean",
+          "default": true,
+          "description": "Spróbuj bezpiecznie wznowić runtime po awarii."
+        },
+        "localCodeAgent.runtime.debug": {
+          "type": "boolean",
+          "default": false
+        },
+        "localCodeAgent.defaultMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "plan",
+            "edit",
+            "agent",
+            "orchestrated"
+          ],
+          "default": "ask"
+        },
+        "localCodeAgent.requireWriteConfirmation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Krytyczne zabezpieczenie; rozszerzenie zawsze wymaga potwierdzenia zapisu."
+        },
+        "localCodeAgent.verifyAfterApply": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.verificationScope": {
+          "type": "string",
+          "enum": [
+            "changed_files",
+            "affected_packages",
+            "workspace"
+          ],
+          "default": "affected_packages"
+        },
+        "localCodeAgent.maxRepairAttempts": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 20
+        },
+        "localCodeAgent.workspace.respectGitignore": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.workspace.includeHiddenFiles": {
+          "type": "boolean",
+          "default": false
+        },
+        "localCodeAgent.workspace.allowSensitiveFiles": {
+          "type": "boolean",
+          "default": false
+        },
+        "localCodeAgent.commands.enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.commands.allowNetwork": {
+          "type": "boolean",
+          "default": false
+        },
+        "localCodeAgent.commands.allowPackageInstall": {
+          "type": "boolean",
+          "default": false
+        },
+        "localCodeAgent.commands.policy": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "verification",
+            "restricted",
+            "custom"
+          ],
+          "default": "verification"
+        },
+        "localCodeAgent.ui.showToolCalls": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.ui.showCommandOutput": {
+          "type": "boolean",
+          "default": false
+        },
+        "localCodeAgent.ui.compactMode": {
+          "type": "boolean",
+          "default": false
+        },
+        "localCodeAgent.history.enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.history.maxItems": {
+          "type": "number",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 50
+        },
+        "localCodeAgent.history.storeFullPrompts": {
+          "type": "boolean",
+          "default": false
+        },
+        "localCodeAgent.orchestration.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Włącza lokalną orkiestrację wyspecjalizowanych agentów."
+        },
+        "localCodeAgent.orchestration.defaultMode": {
+          "type": "string",
+          "enum": [
+            "analysis",
+            "implementation",
+            "autonomous"
+          ],
+          "default": "analysis"
+        },
+        "localCodeAgent.orchestration.maxAgents": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 64
+        },
+        "localCodeAgent.orchestration.maxParallelAgents": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 16
+        },
+        "localCodeAgent.orchestration.requirePlanApproval": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "description": "Krytyczna bramka bezpieczeństwa; wartość false jest ignorowana."
+        },
+        "localCodeAgent.orchestration.requireFinalApproval": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "description": "Krytyczna bramka bezpieczeństwa; wartość false jest ignorowana."
+        },
+        "localCodeAgent.orchestration.requireIndependentReview": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "description": "Niezależny review jest obowiązkowy; wartość false jest ignorowana."
+        },
+        "localCodeAgent.orchestration.requireSecurityReview": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "description": "Security review jest obowiązkowy; wartość false jest ignorowana."
+        },
+        "localCodeAgent.orchestration.showAgentActivity": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.orchestration.showTaskGraph": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.remote.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Włącza opcjonalną integrację remote. Operacje zapisu nadal wymagają osobnej zgody."
+        },
+        "localCodeAgent.remote.provider": {
+          "type": "string",
+          "enum": [
+            "github"
+          ],
+          "default": "github"
+        },
+        "localCodeAgent.github.authenticationMode": {
+          "type": "string",
+          "enum": [
+            "vscode",
+            "token"
+          ],
+          "default": "vscode"
+        },
+        "localCodeAgent.github.apiBaseUrl": {
+          "type": "string",
+          "format": "uri",
+          "default": "https://api.github.com"
+        },
+        "localCodeAgent.github.webBaseUrl": {
+          "type": "string",
+          "format": "uri",
+          "default": "https://github.com"
+        },
+        "localCodeAgent.github.allowEnterprise": {
+          "type": "boolean",
+          "default": false
+        },
+        "localCodeAgent.github.createDraftPullRequest": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.github.requirePushConfirmation": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.github.requirePullRequestConfirmation": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.github.requireCommentConfirmation": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.github.requireResolveThreadConfirmation": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.github.allowLabelChanges": {
+          "type": "boolean",
+          "default": true
+        },
+        "localCodeAgent.github.allowIssueCreation": {
+          "type": "boolean",
+          "default": false
+        },
+        "localCodeAgent.github.allowIssueClosing": {
+          "type": "boolean",
+          "default": false
+        },
+        "localCodeAgent.github.allowReadyForReview": {
+          "type": "boolean",
+          "default": false
+        },
+        "localCodeAgent.github.allowMerge": {
+          "type": "boolean",
+          "default": false,
+          "description": "Zablokowane w tej wersji."
+        },
+        "localCodeAgent.github.allowBranchDelete": {
+          "type": "boolean",
+          "default": false,
+          "description": "Zablokowane w tej wersji."
+        },
+        "localCodeAgent.github.allowForcePush": {
+          "type": "boolean",
+          "default": false,
+          "description": "Zablokowane w tej wersji."
+        },
+        "localCodeAgent.github.ciPollingInterval": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 10000,
+          "maximum": 600000
+        },
+        "localCodeAgent.github.ciMaxWait": {
+          "type": "number",
+          "default": 1800000,
+          "minimum": 10000,
+          "maximum": 7200000
+        }
+      }
+    }
+  }
+}

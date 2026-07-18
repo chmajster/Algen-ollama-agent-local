@@ -1,0 +1,29 @@
+{
+  "name": "@local-code-agent/agent-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "agent": "tsx src/index.ts",
+    "runtime:server": "tsx src/serverEntry.ts",
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@local-code-agent/agent-orchestrator": "*",
+    "@local-code-agent/agent-specialists": "*",
+    "@local-code-agent/change-engine": "*",
+    "@local-code-agent/command-runner": "*",
+    "@local-code-agent/project-verifier": "*",
+    "@local-code-agent/ci-analysis": "*",
+    "@local-code-agent/github-provider": "*",
+    "@local-code-agent/remote-repository": "*",
+    "@local-code-agent/runtime-protocol": "*",
+    "@local-code-agent/shared-types": "*",
+    "@local-code-agent/workspace": "*",
+    "ollama": "^0.6.3",
+    "zod": "^4.4.3"
+  }
+}

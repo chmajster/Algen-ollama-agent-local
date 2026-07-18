@@ -1,0 +1,7 @@
+{
+  "number": 42,
+  "state": "open",
+  "draft": true,
+  "head": { "ref": "agent/task" },
+  "base": { "ref": "main" }
+}

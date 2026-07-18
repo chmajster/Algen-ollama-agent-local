@@ -1,0 +1,5 @@
+{
+  "success": { "status": "completed", "conclusion": "success" },
+  "failure": { "status": "completed", "conclusion": "failure" },
+  "timeout": { "conclusion": "timed_out" }
+}

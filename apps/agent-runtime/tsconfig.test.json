@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "references": [
+    { "path": "../../packages/shared-types" },
+    { "path": "../../packages/runtime-protocol" },
+    { "path": "../../packages/workspace" },
+    { "path": "../../packages/change-engine" },
+    { "path": "../../packages/command-runner" },
+    { "path": "../../packages/project-verifier" }
+  ],
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}

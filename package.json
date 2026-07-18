@@ -1,0 +1,35 @@
+{
+  "name": "local-code-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "agent": "tsx apps/agent-runtime/src/index.ts",
+    "runtime:server": "tsx apps/agent-runtime/src/serverEntry.ts",
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false && tsc -p packages/runtime-protocol/tsconfig.test.json --noEmit --pretty false && tsc -p packages/workspace/tsconfig.test.json --noEmit --pretty false && tsc -p packages/change-engine/tsconfig.test.json --noEmit --pretty false && tsc -p packages/command-runner/tsconfig.test.json --noEmit --pretty false && tsc -p packages/project-verifier/tsconfig.test.json --noEmit --pretty false && tsc -p packages/remote-repository/tsconfig.test.json --noEmit --pretty false && tsc -p packages/ci-analysis/tsconfig.test.json --noEmit --pretty false && tsc -p packages/github-provider/tsconfig.test.json --noEmit --pretty false && tsc -p packages/task-graph/tsconfig.test.json --noEmit --pretty false && tsc -p packages/agent-specialists/tsconfig.test.json --noEmit --pretty false && tsc -p packages/agent-orchestrator/tsconfig.test.json --noEmit --pretty false && tsc -p apps/agent-runtime/tsconfig.test.json --noEmit --pretty false",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:github:e2e": "vitest run packages/github-provider/tests/github.e2e.test.ts",
+    "test:orchestration:e2e": "vitest run apps/agent-runtime/tests/orchestration.e2e.test.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^22.20.0",
+    "eslint": "^9.39.2",
+    "prettier": "^3.9.5",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.64.0",
+    "vitest": "^4.1.10"
+  }
+}

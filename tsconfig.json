@@ -1,0 +1,19 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/shared-types" },
+    { "path": "./packages/runtime-protocol" },
+    { "path": "./packages/workspace" },
+    { "path": "./packages/change-engine" },
+    { "path": "./packages/command-runner" },
+    { "path": "./packages/project-verifier" },
+    { "path": "./packages/remote-repository" },
+    { "path": "./packages/ci-analysis" },
+    { "path": "./packages/github-provider" },
+    { "path": "./packages/task-graph" },
+    { "path": "./packages/agent-specialists" },
+    { "path": "./packages/agent-orchestrator" },
+    { "path": "./apps/agent-runtime" },
+    { "path": "./apps/vscode-extension" }
+  ]
+}

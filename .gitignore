@@ -1,0 +1,13 @@
+node_modules/
+.agent/
+.agent/history/remote-operations.jsonl
+dist/
+dist-types/
+artifacts/
+coverage/
+*.tsbuildinfo
+.env
+!tests/fixtures/sample-project/.env
+.DS_Store
+Thumbs.db
+npm-debug.log*
