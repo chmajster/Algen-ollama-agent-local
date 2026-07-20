@@ -15,6 +15,7 @@ button.danger, .danger { color: var(--vscode-errorForeground); background: trans
 .workspace-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-actions, .composer-row, .button-row { display: flex; align-items: center; gap: 5px; }
 .icon-button { width: 25px; height: 25px; padding: 0; color: var(--vscode-icon-foreground); background: transparent; }
+.icon-button svg { width: 14px; height: 14px; vertical-align: middle; fill: currentColor; }
 .icon-button:hover { background: var(--vscode-toolbar-hoverBackground); }
 .status-badge, .count { display: inline-block; border-radius: 9px; padding: 1px 6px; color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); font-size: 10px; text-transform: lowercase; white-space: nowrap; }
 .tabs { display: flex; overflow-x: auto; scrollbar-width: thin; border-bottom: 1px solid var(--vscode-widget-border); }
