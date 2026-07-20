@@ -40,4 +40,13 @@ describe("installer command composition", () => {
     );
     expect(installer).toMatch(/"-b",\s*\$runtimeProject/u);
   });
+
+  it("does not skip VSIX installation unless the exact extension version is installed", () => {
+    const installer = readFileSync(resolve("install.ps1"), "utf8");
+
+    expect(installer).toContain("function Test-VSCodeExtensionCurrent");
+    expect(installer).toMatch(
+      /\$artifactsCurrent\s+-and\s+\$existingVsix\s+-and\s+\$extensionCurrent/u,
+    );
+  });
 });

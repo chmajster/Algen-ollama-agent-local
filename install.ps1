@@ -341,6 +341,19 @@ function Get-InstalledModels {
     return @($lines | Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+')[0] } | Where-Object { $_ })
 }
 
+function Get-VSCodeExtensionIdentity {
+    $manifestPath = Join-Path $script:RepositoryDirectory "apps\vscode-extension\package.json"
+    $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+    return @{ Id = "$($manifest.publisher).$($manifest.name)"; Version = [string]$manifest.version }
+}
+
+function Test-VSCodeExtensionCurrent {
+    if (-not $script:Executables.code) { return $false }
+    $identity = Get-VSCodeExtensionIdentity
+    $installed = @(Invoke-External $script:Executables.code @("--list-extensions", "--show-versions") "VS Code extension verification" -Capture)
+    return $null -ne ($installed | Where-Object { $_ -eq "$($identity.Id)@$($identity.Version)" } | Select-Object -First 1)
+}
+
 if ($TestCommandComposition) {
     Format-ExternalCommand -FilePath "C:\Program Files\nodejs\npm.cmd" -Arguments @("run", "format:check", "--prefix", "C:\repo")
     exit 0
@@ -454,8 +467,12 @@ try {
     }
 
     Set-InstallStage "install VSIX"
-    if ($artifactsCurrent -and $existingVsix) { Write-InstallLog INFO "VS Code extension artifact is current; forced reinstall skipped" }
-    elseif ($script:VsixPath) { Invoke-PlannedExternal $script:VsixPath.FullName "Install VS Code extension" $script:Executables.code @("--install-extension", $script:VsixPath.FullName, "--force") }
+    $extensionCurrent = if ($WhatIfPreference) { $false } else { Test-VSCodeExtensionCurrent }
+    if ($artifactsCurrent -and $existingVsix -and $extensionCurrent) { Write-InstallLog INFO "VS Code extension is installed at the current version; forced reinstall skipped" }
+    elseif ($script:VsixPath) {
+        Invoke-PlannedExternal $script:VsixPath.FullName "Install VS Code chat extension" $script:Executables.code @("--install-extension", $script:VsixPath.FullName, "--force")
+        if (-not $WhatIfPreference) { $extensionCurrent = Test-VSCodeExtensionCurrent }
+    }
     elseif ($WhatIfPreference) { Write-InstallLog INFO "WhatIf: would install the newly generated VSIX" }
 
     Set-InstallStage "start and verify Ollama"
@@ -500,10 +517,8 @@ try {
         if (-not $script:Executables.git -or -not $script:Executables.npm) { throw "Final executable verification failed." }
         if ((Get-NodeVersion).Major -lt 22) { throw "Final Node.js version verification failed." }
         if (-not $script:BuildSucceeded -or -not $script:VsixPath -or $script:VsixPath.Length -le 0) { throw "Final build or VSIX verification failed." }
-        $extensionPackage = Get-Content -Raw -LiteralPath (Join-Path $script:RepositoryDirectory "apps\vscode-extension\package.json") | ConvertFrom-Json
-        $extensionId = "$($extensionPackage.publisher).$($extensionPackage.name)"
-        $extensions = Invoke-External $script:Executables.code @("--list-extensions", "--show-versions") "VS Code extension verification" -Capture
-        if (-not ($extensions | Where-Object { $_ -match ('^' + [Regex]::Escape($extensionId) + '@') })) { throw "Extension '$extensionId' is not listed by VS Code." }
+        $extensionIdentity = Get-VSCodeExtensionIdentity
+        if (-not $extensionCurrent) { throw "Extension '$($extensionIdentity.Id)@$($extensionIdentity.Version)' is not listed by VS Code." }
         if (-not (Test-OllamaReady)) { throw "Ollama API final verification failed." }
         if ($Model -notin (Get-InstalledModels)) { throw "Configured model '$Model' is not listed by Ollama." }
         if (-not $SkipDoctor -and $Mode -eq "full" -and -not $script:DoctorSucceeded) { throw "Doctor final verification failed." }
