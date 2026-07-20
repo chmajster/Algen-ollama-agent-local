@@ -178,6 +178,40 @@ npm run agent -- doctor
 
 W PowerShell, który blokuje `npm.ps1`, użyj `npm.cmd`.
 
+## Automatic installation on Windows
+
+The production installer supports Windows 10/11 x64, Windows PowerShell 5.1, and PowerShell 7+. It installs into `%LOCALAPPDATA%\Algen\LocalCodeAgent`, safely clones or fast-forwards the source repository, builds the existing monorepo and VS Code extension, verifies Ollama and the selected model, and configures only the extension's host, model, and runtime autostart settings. It never installs a separate runtime service.
+
+Chocolatey is preferred when it is already installed; winget is the fallback. The installer does not bootstrap Chocolatey. Run the following from PowerShell to download the installer to a temporary file, execute it in a separate Windows PowerShell process, retain its exit code, and remove it:
+
+```powershell
+$p = Join-Path $env:TEMP "install-algen-ollama-agent.ps1"; Invoke-WebRequest "https://raw.githubusercontent.com/chmajster/Algen-ollama-agent-local/main/install.ps1" -OutFile $p; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p; $exitCode = $LASTEXITCODE; Remove-Item $p -Force -ErrorAction SilentlyContinue; exit $exitCode
+```
+
+Examples:
+
+```powershell
+.\install.ps1 -Model "qwen3.5:27b"
+.\install.ps1 -SkipDependencyInstall
+.\install.ps1 -SkipModelPull
+.\install.ps1 -WhatIf
+```
+
+`-WhatIf` prints the planned operations without installing packages, changing the repository, running npm, starting Ollama, pulling a model, changing settings, installing the VSIX, or opening VS Code. Re-running the installer is supported. A dirty worktree is never reset or overwritten, including with `-Force`.
+
+Troubleshooting:
+
+- **Chocolatey and winget unavailable:** install one package manager yourself, or install Git, Node.js 22+, Ollama, and VS Code manually and use `-SkipDependencyInstall`.
+- **Chocolatey needs administrator privileges:** accept the UAC prompt. If elevation is prohibited by policy, install dependencies manually and use `-SkipDependencyInstall`. The installer will not repeatedly relaunch itself.
+- **`npm.ps1` is blocked:** no policy change is needed; the installer always invokes `npm.cmd`.
+- **VS Code CLI missing:** reinstall VS Code with its “Add to PATH” option, or ensure `code.cmd` exists under the standard user or Program Files location. `-SkipVSCodeInstall` only skips package installation; final verification still requires the CLI.
+- **Ollama API unavailable:** verify that `<host>/api/version` responds and inspect the timestamped Ollama output/error logs next to the installer log.
+- **Port 11434 conflict:** identify the application listening on the port, stop or reconfigure it, or pass a valid alternative `-OllamaHost`. The endpoint must be an Ollama API.
+- **Insufficient disk space:** free space for npm dependencies, the VSIX, and the selected model; larger model tags can require many gigabytes.
+- **VSIX installation failed:** close no processes; inspect the installer log, verify `code --version`, and retry `code --install-extension <path-to-vsix> --force`.
+- **Dirty Git worktree:** commit or stash local changes before retrying. `-Force` deliberately does not discard Git changes.
+- **Extension not visible after installation:** use **Developer: Reload Window** in VS Code. The installer opens a new window and never closes existing ones.
+
 Przykłady:
 
 ```bash
