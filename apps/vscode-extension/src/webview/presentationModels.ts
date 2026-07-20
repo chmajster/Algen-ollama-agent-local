@@ -93,7 +93,7 @@ export function mapVerification(value: unknown): AgentViewState["verification"] 
     }];
   });
   return {
-    status: text(report.status, steps.length === 0 ? "not-run" : "unknown"),
+    status: steps.length === 0 ? "not-run" : text(report.status, "unknown"),
     ...(typeof report.durationMs === "number" && report.durationMs >= 0
       ? { durationMs: report.durationMs }
       : {}),

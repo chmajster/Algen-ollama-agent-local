@@ -9,7 +9,6 @@ import { EditorContextBuilder } from "./editor/editorContext.js";
 import { GitHubAuthenticationService } from "./github/githubAuthenticationService.js";
 import { ExtensionLogger } from "./logging/logger.js";
 import { AgentViewProvider } from "./providers/agentViewProvider.js";
-import { AgentTreeProvider, githubTreeItems } from "./providers/treeProviders.js";
 import { RuntimeManager } from "./runtime/runtimeManager.js";
 import { SettingsMapper, type ExtensionSettings } from "./settings/settingsMapper.js";
 import { AgentStatusBar } from "./ui/statusBar.js";
@@ -26,8 +25,12 @@ function fallbackState(): AgentViewState {
     trusted: vscode.workspace.isTrusted,
     task: null,
     messages: [],
-    changes: null,
+    history: [],
+    changes: [],
+    checkpoints: [],
     verification: null,
+    orchestration: null,
+    github: { enabled: false, connected: false, permission: "unknown" },
     error: null,
   };
 }
@@ -65,34 +68,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const status = new AgentStatusBar();
   const diffProvider = new AgentDiffProvider();
   const diagnostics = new AgentDiagnostics();
-  const changes = new AgentTreeProvider();
-  const checkpoints = new AgentTreeProvider();
-  const verification = new AgentTreeProvider();
-  const history = new AgentTreeProvider();
-  const orchestration = new AgentTreeProvider();
-  const github = new AgentTreeProvider();
+  const controllerRef: { current?: AgentController } = {};
   const refreshGitHub = async (): Promise<void> => {
     if (!settings.runtime.remoteEnabled) {
-      github.update(githubTreeItems({ enabled: false }));
+      controllerRef.current?.setGitHubState({ enabled: false }, false);
       return;
     }
     try {
       const state = await manager.request("remote.getStatus", {}, { timeoutMs: 10_000 });
-      github.update(githubTreeItems(state));
+      controllerRef.current?.setGitHubState(state, true);
     } catch (error: unknown) {
-      github.update([
-        {
-          id: "github-error",
-          label: "GitHub: unavailable",
-          tooltip: error instanceof Error ? error.message : String(error),
-          icon: "warning",
-        },
-      ]);
+      controllerRef.current?.setGitHubState(
+        { enabled: true },
+        true,
+        error instanceof Error ? error.message : String(error),
+      );
     }
   };
   const githubAuthentication = new GitHubAuthenticationService(context, manager, refreshGitHub);
   const contextBuilder = new EditorContextBuilder(() => workspaceContext.getInfo().activeRoot);
-  const controllerRef: { current?: AgentController } = {};
   const view = new AgentViewProvider(
     context.extensionUri,
     () => controllerRef.current?.state() ?? fallbackState(),
@@ -104,7 +98,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     manager,
     settings,
     view,
-    { changes, checkpoints, verification, history, orchestration },
     diffProvider,
     diagnostics,
     status,
@@ -119,25 +112,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     status,
     diffProvider,
     diagnostics,
-    changes,
-    checkpoints,
-    verification,
-    history,
-    orchestration,
-    github,
     githubAuthentication,
     controller,
     vscode.window.registerWebviewViewProvider("localCodeAgent.chat", view, {
-      webviewOptions: { retainContextWhenHidden: false },
+      webviewOptions: { retainContextWhenHidden: true },
     }),
     vscode.workspace.registerTextDocumentContentProvider("agent-original", diffProvider),
     vscode.workspace.registerTextDocumentContentProvider("agent-modified", diffProvider),
-    vscode.window.registerTreeDataProvider("localCodeAgent.changes", changes),
-    vscode.window.registerTreeDataProvider("localCodeAgent.checkpoints", checkpoints),
-    vscode.window.registerTreeDataProvider("localCodeAgent.verification", verification),
-    vscode.window.registerTreeDataProvider("localCodeAgent.history", history),
-    vscode.window.registerTreeDataProvider("localCodeAgent.orchestration", orchestration),
-    vscode.window.registerTreeDataProvider("localCodeAgent.github", github),
     manager.onNotification((notification) => {
       if (
         notification.method.startsWith("remote.") ||
@@ -168,15 +149,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.onDidGrantWorkspaceTrust(() => void refreshSettings()),
   );
 
-  changes.update([{ id: "changes-empty", label: "Brak przygotowanych zmian", icon: "info" }]);
-  checkpoints.update([{ id: "checkpoints-empty", label: "Brak checkpointów", icon: "info" }]);
-  verification.update([
-    { id: "verification-empty", label: "Brak wyników weryfikacji", icon: "info" },
-  ]);
-  orchestration.update([
-    { id: "orchestration-empty", label: "Brak aktywnej orkiestracji", icon: "info" },
-  ]);
-  github.update(githubTreeItems({ enabled: settings.runtime.remoteEnabled }));
+  controller.setGitHubState(
+    { enabled: settings.runtime.remoteEnabled },
+    settings.runtime.remoteEnabled,
+  );
   await vscode.commands.executeCommand("setContext", "localCodeAgent.taskActive", false);
   if (settings.runtime.autoStartRuntime) {
     await controller.syncRuntime();

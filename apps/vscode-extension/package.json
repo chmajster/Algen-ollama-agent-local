@@ -210,32 +210,8 @@
       "localCodeAgent": [
         {
           "id": "localCodeAgent.chat",
-          "name": "Agent",
+          "name": "Local Code Agent",
           "type": "webview"
-        },
-        {
-          "id": "localCodeAgent.changes",
-          "name": "Zmiany"
-        },
-        {
-          "id": "localCodeAgent.checkpoints",
-          "name": "Checkpointy"
-        },
-        {
-          "id": "localCodeAgent.verification",
-          "name": "Weryfikacja"
-        },
-        {
-          "id": "localCodeAgent.history",
-          "name": "Historia"
-        },
-        {
-          "id": "localCodeAgent.orchestration",
-          "name": "Agent Orchestration"
-        },
-        {
-          "id": "localCodeAgent.github",
-          "name": "GitHub"
         }
       ]
     },
@@ -259,55 +235,6 @@
         {
           "command": "localCodeAgent.reviewActiveFile",
           "group": "localCodeAgent@4"
-        }
-      ],
-      "view/title": [
-        {
-          "command": "localCodeAgent.restartRuntime",
-          "when": "view == localCodeAgent.chat",
-          "group": "navigation@1"
-        },
-        {
-          "command": "localCodeAgent.cancelTask",
-          "when": "view == localCodeAgent.chat && localCodeAgent.taskActive",
-          "group": "navigation@2"
-        },
-        {
-          "command": "localCodeAgent.previewChanges",
-          "when": "view == localCodeAgent.changes",
-          "group": "navigation@1"
-        },
-        {
-          "command": "localCodeAgent.runVerification",
-          "when": "view == localCodeAgent.verification",
-          "group": "navigation@1"
-        },
-        {
-          "command": "localCodeAgent.github.refresh",
-          "when": "view == localCodeAgent.github",
-          "group": "navigation@1"
-        },
-        {
-          "command": "localCodeAgent.approveOrchestration",
-          "when": "view == localCodeAgent.orchestration",
-          "group": "navigation@1"
-        },
-        {
-          "command": "localCodeAgent.rejectOrchestration",
-          "when": "view == localCodeAgent.orchestration",
-          "group": "navigation@2"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "localCodeAgent.showDiff",
-          "when": "view == localCodeAgent.changes",
-          "group": "inline@1"
-        },
-        {
-          "command": "localCodeAgent.restoreCheckpoint",
-          "when": "view == localCodeAgent.checkpoints",
-          "group": "inline@1"
         }
       ]
     },

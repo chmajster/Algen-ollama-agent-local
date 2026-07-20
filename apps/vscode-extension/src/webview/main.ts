@@ -5,9 +5,15 @@ import {
   type TabId,
   type WebviewToHostMessage,
 } from "./messages.js";
+import {
+  canSubmit,
+  filterHistory,
+  historyEmptyLabel,
+  shouldSubmitKey,
+  type PersistedUiState,
+} from "./uiModel.js";
 
 interface VsCodeApi { postMessage(message: unknown): void; getState(): unknown; setState(state: unknown): void }
-interface UiState { activeTab: TabId; draft: string; taskFilter: string }
 declare function acquireVsCodeApi(): VsCodeApi;
 
 const vscode = acquireVsCodeApi();
@@ -24,16 +30,14 @@ const elements = {
 };
 
 let state: AgentViewState | undefined;
-const stored = vscode.getState() as Partial<UiState> | null;
-const ui: UiState = {
+const stored = vscode.getState() as Partial<PersistedUiState> | null;
+const ui: PersistedUiState = {
   activeTab: stored?.activeTab ?? "tasks",
   draft: typeof stored?.draft === "string" ? stored.draft : "",
   taskFilter: typeof stored?.taskFilter === "string" ? stored.taskFilter : "",
 };
 
-export function nextUiState(previous: UiState, update: Partial<UiState>): UiState { return { ...previous, ...update }; }
-export function shouldSubmitKey(key: string, shiftKey: boolean): boolean { return key === "Enter" && !shiftKey; }
-export function emptyState(label: string): HTMLElement { const node = document.createElement("p"); node.className = "empty-state"; node.textContent = label; return node; }
+function emptyState(label: string): HTMLElement { const node = document.createElement("p"); node.className = "empty-state"; node.textContent = label; return node; }
 
 function persist(): void { vscode.setState(ui); }
 function send(message: WebviewToHostMessage): void { const parsed = webviewToHostSchema.safeParse(message); if (parsed.success) vscode.postMessage(parsed.data); }
@@ -45,11 +49,11 @@ function setCount(element: HTMLElement | null, count: number): void { if (elemen
 
 function switchTab(tab: TabId, focus = false): void {
   ui.activeTab = tab; persist();
-  for (const control of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
+  for (const control of Array.from(document.querySelectorAll<HTMLButtonElement>("[data-tab]"))) {
     const active = control.dataset.tab === tab; control.setAttribute("aria-selected", String(active)); control.tabIndex = active ? 0 : -1;
     if (active && focus) control.focus();
   }
-  for (const panel of document.querySelectorAll<HTMLElement>(".tab-panel")) panel.hidden = panel.id !== `tab-${tab}`;
+  for (const panel of Array.from(document.querySelectorAll<HTMLElement>(".tab-panel"))) panel.hidden = panel.id !== `tab-${tab}`;
   if (tab === "chat") requestAnimationFrame(scrollMessages);
 }
 
@@ -64,9 +68,9 @@ function scrollMessages(): void { if (elements.messages !== null) elements.messa
 function renderTasks(view: AgentViewState): void {
   setCount(elements.tasksCount, view.history.length);
   if (elements.taskList === null) return; elements.taskList.replaceChildren();
-  const query = ui.taskFilter.trim().toLocaleLowerCase();
-  const items = view.history.filter((item) => `${item.title} ${item.mode} ${item.status}`.toLocaleLowerCase().includes(query));
-  if (items.length === 0) { elements.taskList.append(emptyState(query === "" ? "Brak zadań" : "Brak pasujących zadań")); return; }
+  const query = ui.taskFilter;
+  const items = filterHistory(view.history, query);
+  if (items.length === 0) { elements.taskList.append(emptyState(historyEmptyLabel(query))); return; }
   for (const item of items) {
     const row = button(""); row.className = "list-row task-row"; row.setAttribute("aria-label", `${item.title}, ${item.mode}, ${item.status}`);
     const status = document.createElement("span"); status.className = "status-icon"; status.textContent = iconFor(item.status); status.setAttribute("aria-hidden", "true");
@@ -117,12 +121,12 @@ function render(view: AgentViewState): void {
   if (elements.mode !== null) { elements.mode.value = view.mode; for (const option of Array.from(elements.mode.options)) option.disabled = !view.trusted && option.value !== "ask"; }
   if (elements.context !== null) elements.context.value = view.context;
   const active = view.task !== null && !["completed", "failed", "cancelled"].includes(view.task.phase); if (elements.cancel !== null) elements.cancel.hidden = !active; if (elements.taskTitle !== null) elements.taskTitle.textContent = view.task?.title ?? "Nowe zadanie"; if (elements.taskPhase !== null) elements.taskPhase.textContent = view.task === null ? "" : ` · ${view.task.phase}`;
-  const runtimeReady = view.runtimeState === "ready"; if (elements.task !== null) elements.task.disabled = !runtimeReady; if (elements.send !== null) elements.send.disabled = !runtimeReady || (elements.task?.value.trim() ?? "") === "";
+  const runtimeReady = view.runtimeState === "ready"; if (elements.task !== null) elements.task.disabled = !runtimeReady; if (elements.send !== null) elements.send.disabled = !canSubmit(view.runtimeState, elements.task?.value ?? "");
   if (elements.messages !== null) { elements.messages.replaceChildren(); if (view.messages.length === 0) elements.messages.append(emptyState("Rozpocznij nowe zadanie, wpisując polecenie poniżej.")); for (const message of view.messages) addMessage(message.role, message.content); if (view.error !== null) addMessage("error", view.error); requestAnimationFrame(scrollMessages); }
   renderTasks(view); renderChanges(view); renderVerification(view); renderOrchestration(view); renderGitHub(view); if (elements.live !== null) elements.live.textContent = `Runtime: ${view.runtimeState}${view.error === null ? "" : `. Błąd: ${view.error}`}`;
 }
 
-function resizeComposer(): void { if (elements.task === null) return; elements.task.style.height = "auto"; elements.task.style.height = `${Math.min(elements.task.scrollHeight, 180)}px`; if (elements.send !== null) elements.send.disabled = state?.runtimeState !== "ready" || elements.task.value.trim() === ""; ui.draft = elements.task.value; persist(); }
+function resizeComposer(): void { if (elements.task === null) return; elements.task.style.height = "auto"; elements.task.style.height = `${Math.min(elements.task.scrollHeight, 180)}px`; if (elements.send !== null) elements.send.disabled = state === undefined || !canSubmit(state.runtimeState, elements.task.value); ui.draft = elements.task.value; persist(); }
 
 document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((control) => control.addEventListener("click", () => switchTab(control.dataset.tab as TabId)));
 byId<HTMLElement>("tabs")?.addEventListener("keydown", (event) => { if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return; const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-tab]")); const current = tabs.findIndex((tab) => tab.dataset.tab === ui.activeTab); const delta = event.key === "ArrowRight" ? 1 : -1; switchTab(tabs[(current + delta + tabs.length) % tabs.length]?.dataset.tab as TabId, true); });

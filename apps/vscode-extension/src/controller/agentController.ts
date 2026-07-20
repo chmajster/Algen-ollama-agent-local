@@ -18,18 +18,18 @@ import { EditorDocumentDirtyError, type EditorContextKind } from "../editor/edit
 import { HistoryService } from "../history/historyService.js";
 import type { ExtensionLogger } from "../logging/logger.js";
 import type { AgentViewProvider } from "../providers/agentViewProvider.js";
-import type { AgentTreeProvider } from "../providers/treeProviders.js";
-import {
-  changeTreeItems,
-  checkpointTreeItems,
-  historyTreeItems,
-  orchestrationTreeItems,
-  verificationTreeItems,
-} from "../providers/treeProviders.js";
 import type { RuntimeManager } from "../runtime/runtimeManager.js";
 import type { ExtensionSettings } from "../settings/settingsMapper.js";
 import type { AgentStatusBar } from "../ui/statusBar.js";
 import type { AgentViewState, WebviewToHostMessage } from "../webview/messages.js";
+import {
+  mapChanges,
+  mapCheckpoints,
+  mapGitHub,
+  mapHistory,
+  mapOrchestration,
+  mapVerification,
+} from "../webview/presentationModels.js";
 import type { WorkspaceContext } from "../workspace/workspaceContext.js";
 
 interface CompletionProgress {
@@ -61,14 +61,6 @@ function phaseMessage(phase: TaskPhase): string {
   return "Analyzing repository";
 }
 
-export interface ControllerProviders {
-  changes: AgentTreeProvider;
-  checkpoints: AgentTreeProvider;
-  verification: AgentTreeProvider;
-  history: AgentTreeProvider;
-  orchestration: AgentTreeProvider;
-}
-
 export class AgentController implements vscode.Disposable {
   private mode: AgentMode;
   private contextKind: EditorContextKind = "none";
@@ -76,6 +68,9 @@ export class AgentController implements vscode.Disposable {
   private messages: AgentViewState["messages"] = [];
   private changes: Record<string, unknown> | null = null;
   private verification: Record<string, unknown> | null = null;
+  private checkpoints: unknown[] = [];
+  private orchestration: Record<string, unknown> | null = null;
+  private github: AgentViewState["github"] = mapGitHub({ enabled: false }, false);
   private error: string | null = null;
   private lastPreview: Record<string, unknown> | undefined;
   private readonly promptSummaries = new Map<string, string>();
@@ -90,14 +85,12 @@ export class AgentController implements vscode.Disposable {
     private readonly manager: RuntimeManager,
     private settings: ExtensionSettings,
     private readonly view: AgentViewProvider,
-    private readonly providers: ControllerProviders,
     private readonly diffProvider: AgentDiffProvider,
     private readonly diagnostics: AgentDiagnostics,
     private readonly status: AgentStatusBar,
     private readonly logger: ExtensionLogger,
   ) {
     this.mode = settings.runtime.mode;
-    this.providers.history.update(historyTreeItems(this.history.list()));
     this.disposables.push(
       manager.onDidChangeState((state) => {
         this.status.updateRuntime(state);
@@ -127,10 +120,20 @@ export class AgentController implements vscode.Disposable {
       trusted: workspace.trusted,
       task: this.task,
       messages: [...this.messages],
-      changes: this.changes,
-      verification: this.verification,
+      history: mapHistory(this.history.list()),
+      changes: mapChanges(this.changes),
+      ...(typeof this.changes?.status === "string" ? { changeStatus: this.changes.status } : {}),
+      checkpoints: mapCheckpoints(this.checkpoints),
+      verification: mapVerification(this.verification),
+      orchestration: mapOrchestration(this.orchestration),
+      github: this.github,
       error: this.error,
     };
+  }
+
+  public setGitHubState(value: unknown, enabled: boolean, error?: string): void {
+    this.github = mapGitHub(error === undefined ? value : { enabled, error }, enabled);
+    void this.view.update();
   }
 
   public setSettings(settings: ExtensionSettings): void {
@@ -298,9 +301,8 @@ export class AgentController implements vscode.Disposable {
       this.manager.request("orchestration.getAgents", { sessionId }),
       this.manager.request("orchestration.getReview", { sessionId }),
     ]);
-    this.providers.orchestration.update(
-      orchestrationTreeItems({ session, graph, agents: agents.agents, review: review.review }),
-    );
+    this.orchestration = { session, graph, agents: agents.agents, review: review.review };
+    await this.view.update();
   }
 
   private changePaths(): string[] {
@@ -318,7 +320,6 @@ export class AgentController implements vscode.Disposable {
     const preview = await this.manager.request("changes.preview", {}, { timeoutMs: 60_000 });
     this.lastPreview = preview;
     this.changes = publicChanges({ status: "previewed", ...preview });
-    this.providers.changes.update(changeTreeItems(preview));
     await this.view.update();
     await this.showDiff(path);
   }
@@ -385,7 +386,6 @@ export class AgentController implements vscode.Disposable {
     await this.manager.request("changes.reject", { reason: "Odrzucono w VS Code." });
     this.changes = null;
     this.lastPreview = undefined;
-    this.providers.changes.update(changeTreeItems(null));
     await this.view.update();
   }
 
@@ -412,7 +412,6 @@ export class AgentController implements vscode.Disposable {
 
   private updateVerification(report: Record<string, unknown>): void {
     this.verification = report;
-    this.providers.verification.update(verificationTreeItems(report));
     this.diagnostics.update(report, this.workspaceContext.getInfo().activeRoot);
     void this.view.update();
   }
@@ -527,10 +526,10 @@ export class AgentController implements vscode.Disposable {
 
   private async refreshAuxiliaryViews(): Promise<void> {
     const checkpoints = await this.manager.request("checkpoints.list", {});
-    this.providers.checkpoints.update(checkpointTreeItems(checkpoints.checkpoints));
+    this.checkpoints = checkpoints.checkpoints;
     const current = await this.manager.request("changes.getCurrent", {});
     this.changes = current.changes;
-    this.providers.changes.update(changeTreeItems(current.changes));
+    await this.view.update();
   }
 
   private async finishTask(task: TaskSummary): Promise<void> {
@@ -553,7 +552,7 @@ export class AgentController implements vscode.Disposable {
         : {}),
     });
     this.promptSummaries.delete(task.id);
-    this.providers.history.update(historyTreeItems(this.history.list()));
+    await this.view.update();
   }
 
   private async handleNotification(notification: JsonRpcNotification): Promise<void> {
@@ -585,26 +584,23 @@ export class AgentController implements vscode.Disposable {
       ].slice(-100);
       await this.view.post({ type: "agent.message", role: "assistant", content: payload.content });
     } else if (notification.method.startsWith("agent.toolCall")) {
-      await this.view.post({ type: "tool.updated", tool: payload });
+      this.logger.debug(`Aktualizacja narzędzia: ${notification.method}`);
     } else if (notification.method === "changes.updated") {
       const current = record(payload.changes);
       if (current !== undefined) {
         this.changes = publicChanges(current);
-        this.providers.changes.update(changeTreeItems(current));
       }
     } else if (notification.method === "changes.previewReady") {
       this.lastPreview = payload;
       this.changes = publicChanges({ status: "previewed", ...payload });
-      this.providers.changes.update(changeTreeItems(payload));
     } else if (notification.method === "changes.rejected") {
       this.changes = null;
       this.lastPreview = undefined;
-      this.providers.changes.update(changeTreeItems(null));
     } else if (notification.method === "verification.completed") {
       this.updateVerification(payload);
     } else if (notification.method.startsWith("checkpoint.")) {
       const response = await this.manager.request("checkpoints.list", {});
-      this.providers.checkpoints.update(checkpointTreeItems(response.checkpoints));
+      this.checkpoints = response.checkpoints;
     } else if (notification.method.startsWith("orchestration.")) {
       const sessionId =
         typeof payload.sessionId === "string"
@@ -641,7 +637,19 @@ export class AgentController implements vscode.Disposable {
     else if (message.type === "diff.open") await this.showDiff(message.path);
     else if (message.type === "settings.open")
       await vscode.commands.executeCommand("localCodeAgent.openSettings");
+    else if (message.type === "logs.open") this.logger.show();
     else if (message.type === "runtime.restart") await this.restartRuntime();
+    else if (message.type === "orchestration.approve") await this.approveOrchestration();
+    else if (message.type === "orchestration.reject") await this.rejectOrchestration();
+    else if (message.type === "github.action") {
+      const command = {
+        connect: "localCodeAgent.github.connect",
+        refresh: "localCodeAgent.github.refresh",
+        publish: "localCodeAgent.github.publishTask",
+        draftPr: "localCodeAgent.github.createDraftPullRequest",
+      }[message.action];
+      await vscode.commands.executeCommand(command);
+    }
   }
 
   public dispose(): void {
