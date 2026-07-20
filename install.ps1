@@ -276,7 +276,7 @@ function Update-Repository {
     $targetCommit = (Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "rev-parse", $target) "git rev-parse target" -Capture | Select-Object -Last 1).Trim()
     $headCommit = (Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "rev-parse", "HEAD") "git rev-parse HEAD" -Capture | Select-Object -Last 1).Trim()
     if ($targetCommit -ne $headCommit) {
-        $dirty = Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "status", "--porcelain") "git status" -Capture
+        $dirty = @(Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "status", "--porcelain") "git status" -Capture)
         if ($dirty.Count -gt 0) { throw "Git worktree is dirty and cannot be updated safely. Commit or stash changes first; -Force never discards changes." }
         if ($isBranch) {
             if (Test-GitReference "refs/heads/$Ref" -UseShowRef) { Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "checkout", $Ref) "git checkout" }
