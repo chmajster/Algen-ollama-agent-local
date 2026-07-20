@@ -31,4 +31,13 @@ describe("installer command composition", () => {
 
     expect(installer).toMatch(/\$dirty\s*=\s*@\(Invoke-External[^\r\n]+status[^\r\n]+-Capture\)/u);
   });
+
+  it("builds the runtime through an absolute project path", () => {
+    const installer = readFileSync(resolve("install.ps1"), "utf8");
+
+    expect(installer).toContain(
+      '$runtimeProject = Join-Path $script:RepositoryDirectory "apps\\agent-runtime"',
+    );
+    expect(installer).toMatch(/"-b",\s*\$runtimeProject/u);
+  });
 });

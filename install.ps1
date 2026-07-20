@@ -424,7 +424,8 @@ try {
         Write-InstallLog INFO "Runtime and extension artifacts match the current commit; build skipped"
     } else {
         if ($script:Cmdlet.ShouldProcess($script:RepositoryDirectory, "Build runtime and direct dependencies")) {
-            $runtimeBuildArguments = @("--prefix", $script:RepositoryDirectory, "exec", "tsc", "--", "-b", "apps/agent-runtime", "--pretty", "false")
+            $runtimeProject = Join-Path $script:RepositoryDirectory "apps\agent-runtime"
+            $runtimeBuildArguments = @("--prefix", $script:RepositoryDirectory, "exec", "tsc", "--", "-b", $runtimeProject, "--pretty", "false")
             try {
                 Invoke-External $script:Executables.npm $runtimeBuildArguments "Build runtime and direct dependencies"
             } catch {
