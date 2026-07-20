@@ -185,7 +185,7 @@ The production installer supports Windows 10/11 x64, Windows PowerShell 5.1, and
 Chocolatey is preferred when it is already installed; winget is the fallback. The installer does not bootstrap Chocolatey. Run the following from PowerShell to download the installer to a temporary file, execute it in a separate Windows PowerShell process, retain its exit code, and remove it:
 
 ```powershell
-$p = Join-Path $env:TEMP "install-algen-ollama-agent.ps1"; Invoke-WebRequest "https://raw.githubusercontent.com/chmajster/Algen-ollama-agent-local/refs/heads/main/install.ps1" -OutFile $p; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p; $exitCode = $LASTEXITCODE; Remove-Item $p -Force -ErrorAction SilentlyContinue; exit $exitCode
+$p = Join-Path $env:TEMP "install-algen-ollama-agent.ps1"; $r = Invoke-RestMethod -Headers @{ "User-Agent" = "Algen-Installer"; Accept = "application/vnd.github+json" } "https://api.github.com/repos/chmajster/Algen-ollama-agent-local/contents/install.ps1?ref=main"; [IO.File]::WriteAllBytes($p, [Convert]::FromBase64String(($r.content -replace "\s", ""))); & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p; $exitCode = $LASTEXITCODE; Remove-Item $p -Force -ErrorAction SilentlyContinue; exit $exitCode
 ```
 
 Examples:

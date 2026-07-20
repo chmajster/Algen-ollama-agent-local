@@ -141,7 +141,19 @@ function Invoke-External {
     } elseif ($lines.Count -gt 0) { Write-InstallLog INFO "External process produced $($lines.Count) output line(s); use -Debug for details" }
     if ($diagnosticPath) { Write-InstallLog WARN "Command output exceeded $maxOutputBytes bytes; full output saved to $diagnosticPath" }
     Write-InstallLog INFO "External process exit code: $exitCode"
-    if ($exitCode -ne 0) { throw "$Description failed with exit code $exitCode." }
+    if ($exitCode -ne 0) {
+        if (-not $diagnosticPath) {
+            try {
+                $diagnosticDirectory = if ($script:LogPath) { Split-Path $script:LogPath } else { [IO.Path]::GetTempPath() }
+                $diagnosticPath = Join-Path $diagnosticDirectory ("command-failed-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss-fff"))
+                $lines.ToArray() | Set-Content -LiteralPath $diagnosticPath -Encoding UTF8
+                Write-InstallLog WARN "Failed command output saved to $diagnosticPath"
+            } catch { Write-InstallLog WARN "Failed command output could not be saved: $($_.Exception.Message)" }
+        }
+        $lastLine = $lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Last 1
+        if ($lastLine) { Write-InstallLog ERROR ("Last process output: " + $lastLine.Substring(0, [Math]::Min(1000, $lastLine.Length))) }
+        throw "$Description failed with exit code $exitCode."
+    }
     if ($Capture) { return $lines.ToArray() }
 }
 
@@ -411,7 +423,15 @@ try {
     } elseif ($artifactsCurrent) {
         Write-InstallLog INFO "Runtime and extension artifacts match the current commit; build skipped"
     } else {
-        Invoke-PlannedExternal $script:RepositoryDirectory "Build runtime and direct dependencies" $script:Executables.npm @("--prefix", $script:RepositoryDirectory, "exec", "tsc", "--", "-b", "apps/agent-runtime", "--pretty", "false")
+        if ($script:Cmdlet.ShouldProcess($script:RepositoryDirectory, "Build runtime and direct dependencies")) {
+            $runtimeBuildArguments = @("--prefix", $script:RepositoryDirectory, "exec", "tsc", "--", "-b", "apps/agent-runtime", "--pretty", "false")
+            try {
+                Invoke-External $script:Executables.npm $runtimeBuildArguments "Build runtime and direct dependencies"
+            } catch {
+                Write-InstallLog WARN "Incremental runtime build failed; retrying once with refreshed TypeScript build state"
+                Invoke-External $script:Executables.npm ($runtimeBuildArguments + "--force") "Build runtime and direct dependencies (forced retry)"
+            }
+        }
         Invoke-PlannedExternal $script:RepositoryDirectory "Build VS Code extension" $script:Executables.npm @("run", "build", "--workspace", "apps/vscode-extension", "--prefix", $script:RepositoryDirectory)
     }
     if (-not $WhatIfPreference) { $script:BuildSucceeded = Test-RequiredArtifacts }
