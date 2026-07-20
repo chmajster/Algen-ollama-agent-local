@@ -19,7 +19,8 @@ param(
     [switch]$NoLaunch,
     [switch]$Force,
     [switch]$Unattended,
-    [Parameter(DontShow = $true)][switch]$ElevatedRelaunch
+    [Parameter(DontShow = $true)][switch]$ElevatedRelaunch,
+    [Parameter(DontShow = $true)][switch]$TestCommandComposition
 )
 
 Set-StrictMode -Version Latest
@@ -39,7 +40,14 @@ $script:RepositoryChanged = $true
 $script:StatePath = $null
 $script:FetchPerformed = $false
 
-Import-Module (Join-Path $PSScriptRoot "scripts\InstallerCommand.psm1") -Force
+function Format-ExternalCommand {
+    param([Parameter(Mandatory = $true)][string]$FilePath, [string[]]$Arguments = @())
+    $executable = Split-Path -Leaf $FilePath
+    $displayArguments = $Arguments | ForEach-Object {
+        if ($_ -match '[\s"]') { '"{0}"' -f ($_ -replace '"', '\"') } else { $_ }
+    }
+    return (@($executable) + $displayArguments) -join ' '
+}
 
 function Write-InstallLog {
     param([ValidateSet("INFO", "WARN", "ERROR")][string]$Level, [string]$Message)
@@ -319,6 +327,11 @@ function Invoke-PlannedExternal {
 function Get-InstalledModels {
     $lines = Invoke-External $script:Executables.ollama @("list") "ollama.exe list" -Capture
     return @($lines | Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+')[0] } | Where-Object { $_ })
+}
+
+if ($TestCommandComposition) {
+    Format-ExternalCommand -FilePath "C:\Program Files\nodejs\npm.cmd" -Arguments @("run", "format:check", "--prefix", "C:\repo")
+    exit 0
 }
 
 try {
