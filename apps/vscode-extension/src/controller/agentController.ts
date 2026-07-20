@@ -111,6 +111,17 @@ export class AgentController implements vscode.Disposable {
 
   public state(): AgentViewState {
     const workspace = this.workspaceContext.getInfo();
+    const history = mapHistory(this.history.list());
+    if (this.task !== null && !history.some((item) => item.id === this.task?.id)) {
+      history.unshift({
+        id: this.task.id,
+        title: this.promptSummaries.get(this.task.id) ?? this.task.title,
+        mode: this.task.mode,
+        status: this.task.phase,
+        createdAt: this.task.createdAt,
+        filesChanged: 0,
+      });
+    }
     return {
       runtimeState: this.manager.getState(),
       mode: workspace.trusted ? this.mode : "ask",
@@ -120,7 +131,7 @@ export class AgentController implements vscode.Disposable {
       trusted: workspace.trusted,
       task: this.task,
       messages: [...this.messages],
-      history: mapHistory(this.history.list()),
+      history: history.slice(0, 50),
       changes: mapChanges(this.changes),
       ...(typeof this.changes?.status === "string" ? { changeStatus: this.changes.status } : {}),
       checkpoints: mapCheckpoints(this.checkpoints),
@@ -620,9 +631,14 @@ export class AgentController implements vscode.Disposable {
   }
 
   public async handleWebview(message: WebviewToHostMessage): Promise<void> {
-    if (message.type === "webview.ready")
+    if (message.type === "webview.ready") {
       await this.view.post({ type: "state.initial", state: this.state() });
-    else if (message.type === "task.submit")
+      if (this.manager.getState() === "ready" || this.manager.getState() === "busy") {
+        void this.refreshAuxiliaryViews().catch((error: unknown) =>
+          this.logger.debug(`Nie udało się odświeżyć danych panelu: ${String(error)}`),
+        );
+      }
+    } else if (message.type === "task.submit")
       await this.submit(message.task, message.mode, message.context);
     else if (message.type === "task.cancel") await this.cancelTask();
     else if (message.type === "mode.change") this.setMode(message.mode);
@@ -641,13 +657,16 @@ export class AgentController implements vscode.Disposable {
     else if (message.type === "runtime.restart") await this.restartRuntime();
     else if (message.type === "orchestration.approve") await this.approveOrchestration();
     else if (message.type === "orchestration.reject") await this.rejectOrchestration();
-    else if (message.type === "github.action") {
-      const command = {
-        connect: "localCodeAgent.github.connect",
-        refresh: "localCodeAgent.github.refresh",
-        publish: "localCodeAgent.github.publishTask",
-        draftPr: "localCodeAgent.github.createDraftPullRequest",
-      }[message.action];
+    else if (message.type === "github.action" && message.action === "refresh") {
+      const github = await this.manager.request("remote.getStatus", {}, { timeoutMs: 10_000 });
+      this.setGitHubState(github, this.settings.runtime.remoteEnabled);
+    } else if (message.type === "github.action") {
+      const command =
+        message.action === "connect"
+          ? "localCodeAgent.github.connect"
+          : message.action === "publish"
+            ? "localCodeAgent.github.publishTask"
+            : "localCodeAgent.github.createDraftPullRequest";
       await vscode.commands.executeCommand(command);
     }
   }
