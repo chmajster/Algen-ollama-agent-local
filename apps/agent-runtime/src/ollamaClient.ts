@@ -194,7 +194,6 @@ export class OllamaClient implements AgentModelClient {
             temperature: this.config.temperature,
             num_ctx: this.config.contextLength,
             num_predict: this.config.ollamaMaxResponseTokens,
-            num_batch: 1,
           },
         }),
       );
