@@ -62,6 +62,19 @@ const echoSchema = z.object({ value: z.string() }).strict();
 function createRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register({
+    name: "read_file",
+    description: "Czyta plik.",
+    schema: z.object({ path: z.string() }).strict(),
+    definition: createToolDefinition(
+      "read_file",
+      "Czyta plik.",
+      z.object({ path: z.string() }).strict(),
+    ),
+    async execute({ path }): Promise<Record<string, unknown>> {
+      return { path, binary: false, startLine: 1, endLine: 1, content: path };
+    },
+  });
+  registry.register({
     name: "echo",
     description: "Zwraca wartość.",
     schema: echoSchema,
@@ -95,6 +108,24 @@ function toolMessages(request: ModelChatRequest): AgentMessage[] {
 }
 
 describe("AgentLoop", () => {
+  it("blokuje dodatkowe odczyty w tej samej odpowiedzi po osiÄ…gniÄ™ciu limitu plikĂłw", async () => {
+    const client = new MockModelClient([
+      response("", [call("read_file", { path: "a.ts" }), call("read_file", { path: "b.ts" })]),
+      response("Gotowe"),
+    ]);
+    const agent = new AgentLoop(client, createRegistry(), {
+      defaultMaxSteps: 4,
+      maxFilesPerTask: 1,
+    });
+
+    const result = await agent.run({ task: "Odczytaj pliki" });
+
+    expect(result).toMatchObject({ finishReason: "completed", filesRead: 1, toolErrors: 1 });
+    const messages = toolMessages(client.requests[1] ?? { messages: [], tools: [] });
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.content).toContain("FILE_LIMIT_EXCEEDED");
+  });
+
   it("kończy po odpowiedzi modelu bez narzędzia", async () => {
     const client = new MockModelClient([response("Gotowe")]);
 

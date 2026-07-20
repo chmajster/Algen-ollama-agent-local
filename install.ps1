@@ -9,6 +9,7 @@ param(
     [string]$OllamaHost = "http://127.0.0.1:11434",
     [ValidateSet("quick", "full")][string]$Mode = "quick",
     [int]$NodeMemoryMb = $(if ($env:ALGEN_NODE_MEMORY_MB) { [int]$env:ALGEN_NODE_MEMORY_MB } else { 1024 }),
+    [ValidateRange(1, 10080)][int]$FetchIntervalMinutes = 60,
     [switch]$SkipDependencyInstall,
     [switch]$SkipModelPull,
     [switch]$SkipVSCodeInstall,
@@ -36,6 +37,7 @@ $script:BuildSucceeded = $false
 $script:DoctorSucceeded = $false
 $script:RepositoryChanged = $true
 $script:StatePath = $null
+$script:FetchPerformed = $false
 
 Import-Module (Join-Path $PSScriptRoot "scripts\InstallerCommand.psm1") -Force
 
@@ -175,7 +177,7 @@ function Invoke-PackageAction {
 function Get-RelaunchArguments {
     $quote = { param([string]$value) '"' + ($value -replace '"', '\"') + '"' }
     $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (& $quote $PSCommandPath))
-    foreach ($name in @("InstallRoot", "RepositoryUrl", "Ref", "Model", "OllamaHost", "Mode", "NodeMemoryMb")) {
+    foreach ($name in @("InstallRoot", "RepositoryUrl", "Ref", "Model", "OllamaHost", "Mode", "NodeMemoryMb", "FetchIntervalMinutes")) {
         $arguments += "-$name"; $arguments += (& $quote ([string](Get-Variable -Name $name -ValueOnly)))
     }
     foreach ($name in @("SkipDependencyInstall", "SkipModelPull", "SkipVSCodeInstall", "SkipVSCodeConfiguration", "SkipTests", "SkipDoctor", "NoLaunch", "Force", "Unattended")) {
@@ -235,18 +237,27 @@ function Test-GitReference {
 function Update-Repository {
     if (-not (Test-Path -LiteralPath $script:RepositoryDirectory)) {
         Invoke-External $script:Executables.git @("clone", $RepositoryUrl, $script:RepositoryDirectory) "git clone"
+        $script:FetchPerformed = $true
     } else {
         $inside = Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "rev-parse", "--is-inside-work-tree") "git rev-parse" -Capture
         if (($inside | Select-Object -Last 1).Trim() -ne "true") { throw "Repository directory is not a valid Git worktree." }
         $origin = (Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "remote", "get-url", "origin") "git remote" -Capture | Select-Object -Last 1).Trim()
         if (-not (Test-OriginMatch $origin $RepositoryUrl)) { throw "Existing origin '$origin' does not match RepositoryUrl '$RepositoryUrl'." }
         $localHead = (Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "rev-parse", "HEAD") "git rev-parse" -Capture | Select-Object -Last 1).Trim()
-        $remoteHead = (Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "ls-remote", "origin", "refs/heads/$Ref") "git ls-remote" -Capture | Select-Object -Last 1) -split '\s+' | Select-Object -First 1
-        if ($remoteHead -and $localHead -eq $remoteHead -and -not $Force) {
+        $cachedRemoteReference = "refs/remotes/origin/$Ref"
+        $cachedRemoteHead = if (Test-GitReference $cachedRemoteReference -UseShowRef) {
+            (Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "rev-parse", $cachedRemoteReference) "git rev-parse cached origin" -Capture | Select-Object -Last 1).Trim()
+        } else { $null }
+        $savedState = Get-InstallerState
+        $lastFetch = [DateTimeOffset]::MinValue
+        $hasRecentFetch = $savedState.lastFetchAt -and [DateTimeOffset]::TryParse([string]$savedState.lastFetchAt, [ref]$lastFetch) -and
+            ([DateTimeOffset]::UtcNow - $lastFetch.ToUniversalTime()).TotalMinutes -lt $FetchIntervalMinutes
+        if ($Mode -eq "quick" -and $cachedRemoteHead -and $localHead -eq $cachedRemoteHead -and $hasRecentFetch -and -not $Force) {
             $script:RepositoryChanged = $false
-            Write-InstallLog INFO "Local commit matches origin/$Ref; fetch skipped"
+            Write-InstallLog INFO "Local commit matches cached origin/$Ref and the last fetch is recent; network fetch skipped"
         } else {
             Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "fetch", "--prune", "origin") "git fetch"
+            $script:FetchPerformed = $true
         }
     }
 
@@ -271,7 +282,7 @@ function Update-Repository {
 }
 
 function Get-InstallerState {
-    $defaults = [ordered]@{ lockHash = ""; commit = ""; dependenciesComplete = $false; artifactsComplete = $false }
+    $defaults = [ordered]@{ lockHash = ""; commit = ""; dependenciesComplete = $false; artifactsComplete = $false; lastFetchAt = "" }
     if (-not (Test-Path -LiteralPath $script:StatePath -PathType Leaf)) { return [pscustomobject]$defaults }
     try {
         $saved = Get-Content -Raw -LiteralPath $script:StatePath | ConvertFrom-Json
@@ -283,8 +294,8 @@ function Get-InstallerState {
 }
 
 function Save-InstallerState {
-    param([string]$LockHash, [string]$Commit, [bool]$DependenciesComplete, [bool]$ArtifactsComplete)
-    $state = [ordered]@{ version = 1; lockHash = $LockHash; commit = $Commit; dependenciesComplete = $DependenciesComplete; artifactsComplete = $ArtifactsComplete; completedAt = (Get-Date -Format o) }
+    param([string]$LockHash, [string]$Commit, [bool]$DependenciesComplete, [bool]$ArtifactsComplete, [string]$LastFetchAt)
+    $state = [ordered]@{ version = 2; lockHash = $LockHash; commit = $Commit; dependenciesComplete = $DependenciesComplete; artifactsComplete = $ArtifactsComplete; lastFetchAt = $LastFetchAt; completedAt = (Get-Date -Format o) }
     $temporary = "$($script:StatePath).tmp"
     $state | ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding UTF8
     Move-Item -LiteralPath $temporary -Destination $script:StatePath -Force
@@ -409,11 +420,13 @@ try {
     }
 
     Set-InstallStage "install VSIX"
-    if ($script:VsixPath) { Invoke-PlannedExternal $script:VsixPath.FullName "Install VS Code extension" $script:Executables.code @("--install-extension", $script:VsixPath.FullName, "--force") }
+    if ($artifactsCurrent -and $existingVsix) { Write-InstallLog INFO "VS Code extension artifact is current; forced reinstall skipped" }
+    elseif ($script:VsixPath) { Invoke-PlannedExternal $script:VsixPath.FullName "Install VS Code extension" $script:Executables.code @("--install-extension", $script:VsixPath.FullName, "--force") }
     elseif ($WhatIfPreference) { Write-InstallLog INFO "WhatIf: would install the newly generated VSIX" }
 
     Set-InstallStage "start and verify Ollama"
-    if (-not (Test-OllamaReady)) {
+    if ($WhatIfPreference) { Write-InstallLog INFO "WhatIf: Ollama readiness probe skipped" }
+    elseif (-not (Test-OllamaReady)) {
         if ($script:Cmdlet.ShouldProcess($OllamaHost, "Start detached Ollama server")) {
             $ollamaOut = Join-Path (Split-Path $script:LogPath) ("ollama-{0}.out.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
             $ollamaErr = Join-Path (Split-Path $script:LogPath) ("ollama-{0}.err.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
@@ -460,7 +473,8 @@ try {
         if (-not (Test-OllamaReady)) { throw "Ollama API final verification failed." }
         if ($Model -notin (Get-InstalledModels)) { throw "Configured model '$Model' is not listed by Ollama." }
         if (-not $SkipDoctor -and $Mode -eq "full" -and -not $script:DoctorSucceeded) { throw "Doctor final verification failed." }
-        Save-InstallerState $lockHash $headCommit $true $true
+        $fetchTimestamp = if ($script:FetchPerformed) { [DateTimeOffset]::UtcNow.ToString("o") } else { [string]$state.lastFetchAt }
+        Save-InstallerState $lockHash $headCommit $true $true $fetchTimestamp
         Write-InstallLog INFO "Final verification passed: Git, Node, npm, build, VSIX, extension, Ollama, model$(if (-not $SkipDoctor -and $Mode -eq 'full') { ', doctor' })"
     } else { Write-InstallLog INFO "WhatIf: would verify every enabled final-state check" }
 

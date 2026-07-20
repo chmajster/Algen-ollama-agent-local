@@ -258,6 +258,14 @@ function recordToolSuccess(toolName: string, value: unknown, metrics: RunMetrics
   }
 }
 
+function requestedFilePath(call: ModelToolCall): string | undefined {
+  if (!["read_file", "read_file_range"].includes(call.function.name)) return undefined;
+  const arguments_ = call.function.arguments;
+  return isRecord(arguments_) && typeof arguments_.path === "string"
+    ? arguments_.path.replaceAll("\\", "/")
+    : undefined;
+}
+
 export class AgentLoop {
   private readonly logger: (message: string) => void;
 
@@ -428,17 +436,6 @@ export class AgentLoop {
           finishReason: "error",
         });
       }
-      if (
-        this.configuration.maxFilesPerTask !== undefined &&
-        metrics.uniqueFilesAccessed.size >= this.configuration.maxFilesPerTask
-      ) {
-        return finish({
-          answer: "OsiÄ…gniÄ™to limit plikĂłw odczytanych w tym zadaniu.",
-          steps: step - 1,
-          toolCalls,
-          finishReason: "error",
-        });
-      }
       if (isSignalAborted(options.signal)) {
         this.debug(`przerwano przed krokiem ${step}`);
         return finish({
@@ -500,6 +497,31 @@ export class AgentLoop {
           this.toolDebug(`argumenty: ${debugArguments(call.function.arguments)}`);
           if (call.function.name === "search_text") metrics.searchesPerformed += 1;
           let content: string;
+          const requestedPath = requestedFilePath(call);
+          if (
+            requestedPath !== undefined &&
+            this.configuration.maxFilesPerTask !== undefined &&
+            !metrics.uniqueFilesAccessed.has(requestedPath) &&
+            metrics.uniqueFilesAccessed.size >= this.configuration.maxFilesPerTask
+          ) {
+            metrics.toolErrors += 1;
+            content = JSON.stringify({
+              ok: false,
+              error: {
+                code: "FILE_LIMIT_EXCEEDED",
+                message: "OsiÄ…gniÄ™to limit plikĂłw odczytanych w tym zadaniu.",
+                recoverable: true,
+              },
+            });
+            this.configuration.observer?.toolCallFailed?.({
+              id: toolCallId,
+              name: call.function.name,
+              durationMs: 0,
+              error: "OsiÄ…gniÄ™to limit plikĂłw odczytanych w tym zadaniu.",
+            });
+            history.push({ role: "tool", toolName: call.function.name, content });
+            continue;
+          }
           try {
             const value = await this.tools.execute(call.function.name, call.function.arguments);
             if (call.function.name === "apply_changes") {
