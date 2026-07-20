@@ -7,6 +7,8 @@ param(
     [string]$Ref = "main",
     [string]$Model = "qwen3.5:9b",
     [string]$OllamaHost = "http://127.0.0.1:11434",
+    [ValidateSet("quick", "full")][string]$Mode = "quick",
+    [int]$NodeMemoryMb = $(if ($env:ALGEN_NODE_MEMORY_MB) { [int]$env:ALGEN_NODE_MEMORY_MB } else { 1024 }),
     [switch]$SkipDependencyInstall,
     [switch]$SkipModelPull,
     [switch]$SkipVSCodeInstall,
@@ -32,6 +34,10 @@ $script:Cmdlet = $PSCmdlet
 $script:VsixPath = $null
 $script:BuildSucceeded = $false
 $script:DoctorSucceeded = $false
+$script:RepositoryChanged = $true
+$script:StatePath = $null
+
+Import-Module (Join-Path $PSScriptRoot "scripts\InstallerCommand.psm1") -Force
 
 function Write-InstallLog {
     param([ValidateSet("INFO", "WARN", "ERROR")][string]$Level, [string]$Message)
@@ -90,18 +96,43 @@ function Resolve-Dependencies {
 
 function Invoke-External {
     param([string]$FilePath, [string[]]$Arguments = @(), [string]$Description = $FilePath, [switch]$Capture)
-    $displayArguments = $Arguments | ForEach-Object { if ($_ -match '\s') { '"{0}"' -f $_ } else { $_ } }
-    Write-InstallLog INFO ("Command: {0} {1}" -f $Description, ($displayArguments -join " "))
+    Write-InstallLog INFO ("Command: " + (Format-ExternalCommand -FilePath $FilePath -Arguments $Arguments))
     $previousErrorPreference = $ErrorActionPreference
+    $lines = New-Object 'System.Collections.Generic.List[string]'
+    $maxOutputBytes = 1024 * $(if ($env:ALGEN_MAX_COMMAND_OUTPUT_KB) { [int]$env:ALGEN_MAX_COMMAND_OUTPUT_KB } else { 256 })
+    $capturedBytes = 0
+    $diagnosticWriter = $null
+    $diagnosticPath = $null
     try {
         $ErrorActionPreference = "Continue"
-        $lines = @(& $FilePath @Arguments 2>&1 | ForEach-Object { $_.ToString() })
+        & $FilePath @Arguments 2>&1 | ForEach-Object {
+            $line = $_.ToString()
+            $lineBytes = [Text.Encoding]::UTF8.GetByteCount($line) + 1
+            if ($capturedBytes + $lineBytes -le $maxOutputBytes) {
+                [void]$lines.Add($line)
+                $capturedBytes += $lineBytes
+            } else {
+                if (-not $diagnosticWriter) {
+                    $diagnosticDirectory = if ($script:LogPath) { Split-Path $script:LogPath } else { [IO.Path]::GetTempPath() }
+                    $diagnosticPath = Join-Path $diagnosticDirectory ("command-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss-fff"))
+                    $diagnosticWriter = New-Object IO.StreamWriter($diagnosticPath, $false, (New-Object Text.UTF8Encoding($false)))
+                    foreach ($capturedLine in $lines) { $diagnosticWriter.WriteLine($capturedLine) }
+                }
+                $diagnosticWriter.WriteLine($line)
+            }
+        }
         $exitCode = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $previousErrorPreference }
-    foreach ($line in $lines) { Write-InstallLog INFO ("process-output: " + $line) }
+    } finally {
+        if ($diagnosticWriter) { $diagnosticWriter.Dispose() }
+        $ErrorActionPreference = $previousErrorPreference
+    }
+    if ($DebugPreference -ne "SilentlyContinue") {
+        foreach ($line in $lines) { Write-InstallLog INFO ("process-output: " + $line) }
+    } elseif ($lines.Count -gt 0) { Write-InstallLog INFO "External process produced $($lines.Count) output line(s); use -Debug for details" }
+    if ($diagnosticPath) { Write-InstallLog WARN "Command output exceeded $maxOutputBytes bytes; full output saved to $diagnosticPath" }
     Write-InstallLog INFO "External process exit code: $exitCode"
     if ($exitCode -ne 0) { throw "$Description failed with exit code $exitCode." }
-    if ($Capture) { return $lines }
+    if ($Capture) { return $lines.ToArray() }
 }
 
 function Get-NodeVersion {
@@ -144,7 +175,7 @@ function Invoke-PackageAction {
 function Get-RelaunchArguments {
     $quote = { param([string]$value) '"' + ($value -replace '"', '\"') + '"' }
     $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (& $quote $PSCommandPath))
-    foreach ($name in @("InstallRoot", "RepositoryUrl", "Ref", "Model", "OllamaHost")) {
+    foreach ($name in @("InstallRoot", "RepositoryUrl", "Ref", "Model", "OllamaHost", "Mode", "NodeMemoryMb")) {
         $arguments += "-$name"; $arguments += (& $quote ([string](Get-Variable -Name $name -ValueOnly)))
     }
     foreach ($name in @("SkipDependencyInstall", "SkipModelPull", "SkipVSCodeInstall", "SkipVSCodeConfiguration", "SkipTests", "SkipDoctor", "NoLaunch", "Force", "Unattended")) {
@@ -174,7 +205,9 @@ function Assert-ValidParameters {
     $root = [IO.Path]::GetPathRoot($script:ResolvedInstallRoot)
     if ($script:ResolvedInstallRoot.TrimEnd('\') -eq $root.TrimEnd('\')) { throw "InstallRoot cannot be a filesystem root." }
     $script:RepositoryDirectory = Join-Path $script:ResolvedInstallRoot "source"
+    $script:StatePath = Join-Path $script:ResolvedInstallRoot "installer-state.json"
     $env:OLLAMA_HOST = $OllamaHost
+    $env:NODE_OPTIONS = "--max-old-space-size=$NodeMemoryMb"
     Write-InstallLog INFO "Validated repository URL, ref, model, host, and install path"
 }
 
@@ -207,7 +240,14 @@ function Update-Repository {
         if (($inside | Select-Object -Last 1).Trim() -ne "true") { throw "Repository directory is not a valid Git worktree." }
         $origin = (Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "remote", "get-url", "origin") "git remote" -Capture | Select-Object -Last 1).Trim()
         if (-not (Test-OriginMatch $origin $RepositoryUrl)) { throw "Existing origin '$origin' does not match RepositoryUrl '$RepositoryUrl'." }
-        Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "fetch", "--prune", "origin") "git fetch"
+        $localHead = (Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "rev-parse", "HEAD") "git rev-parse" -Capture | Select-Object -Last 1).Trim()
+        $remoteHead = (Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "ls-remote", "origin", "refs/heads/$Ref") "git ls-remote" -Capture | Select-Object -Last 1) -split '\s+' | Select-Object -First 1
+        if ($remoteHead -and $localHead -eq $remoteHead -and -not $Force) {
+            $script:RepositoryChanged = $false
+            Write-InstallLog INFO "Local commit matches origin/$Ref; fetch skipped"
+        } else {
+            Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "fetch", "--prune", "origin") "git fetch"
+        }
     }
 
     $remoteBranch = "refs/remotes/origin/$Ref"
@@ -228,6 +268,36 @@ function Update-Repository {
         }
     } else { Write-InstallLog INFO "Repository already resolves to requested ref $Ref ($targetCommit)" }
     Write-InstallLog INFO "Repository path: $script:RepositoryDirectory"
+}
+
+function Get-InstallerState {
+    $defaults = [ordered]@{ lockHash = ""; commit = ""; dependenciesComplete = $false; artifactsComplete = $false }
+    if (-not (Test-Path -LiteralPath $script:StatePath -PathType Leaf)) { return [pscustomobject]$defaults }
+    try {
+        $saved = Get-Content -Raw -LiteralPath $script:StatePath | ConvertFrom-Json
+        foreach ($name in @($defaults.Keys)) {
+            if ($saved.PSObject.Properties.Name -contains $name) { $defaults[$name] = $saved.$name }
+        }
+        return [pscustomobject]$defaults
+    } catch { Write-InstallLog WARN "Installer state is unreadable; required work will be repeated"; return [pscustomobject]$defaults }
+}
+
+function Save-InstallerState {
+    param([string]$LockHash, [string]$Commit, [bool]$DependenciesComplete, [bool]$ArtifactsComplete)
+    $state = [ordered]@{ version = 1; lockHash = $LockHash; commit = $Commit; dependenciesComplete = $DependenciesComplete; artifactsComplete = $ArtifactsComplete; completedAt = (Get-Date -Format o) }
+    $temporary = "$($script:StatePath).tmp"
+    $state | ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding UTF8
+    Move-Item -LiteralPath $temporary -Destination $script:StatePath -Force
+}
+
+function Test-NodeModulesComplete {
+    $modules = Join-Path $script:RepositoryDirectory "node_modules"
+    return (Test-Path -LiteralPath $modules -PathType Container) -and (Test-Path -LiteralPath (Join-Path $modules ".package-lock.json") -PathType Leaf)
+}
+
+function Test-RequiredArtifacts {
+    return (Test-Path -LiteralPath (Join-Path $script:RepositoryDirectory "apps\agent-runtime\dist\serverEntry.js") -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $script:RepositoryDirectory "apps\vscode-extension\dist\extension.js") -PathType Leaf)
 }
 
 function Invoke-PlannedExternal {
@@ -294,21 +364,47 @@ try {
     if ($script:Cmdlet.ShouldProcess($script:RepositoryDirectory, "Clone or fast-forward repository to $Ref")) { Update-Repository }
 
     Set-InstallStage "install npm dependencies"
-    $npmAction = if (Test-Path -LiteralPath (Join-Path $script:RepositoryDirectory "package-lock.json")) { "ci" } else { "install" }
-    Invoke-PlannedExternal $script:RepositoryDirectory "npm.cmd $npmAction" $script:Executables.npm @($npmAction, "--prefix", $script:RepositoryDirectory)
+    $lockPath = Join-Path $script:RepositoryDirectory "package-lock.json"
+    $lockHash = if (Test-Path -LiteralPath $lockPath -PathType Leaf) { (Get-FileHash -Algorithm SHA256 -LiteralPath $lockPath).Hash } else { "no-lockfile" }
+    $state = Get-InstallerState
+    $dependenciesCurrent = -not $Force -and $Mode -eq "quick" -and (Test-NodeModulesComplete) -and
+        $state.dependenciesComplete -eq $true -and $state.lockHash -eq $lockHash
+    if ($dependenciesCurrent) {
+        Write-InstallLog INFO "Dependencies are current; npm install skipped"
+    } else {
+        $npmAction = if (Test-Path -LiteralPath $lockPath) { "ci" } else { "install" }
+        Invoke-PlannedExternal $script:RepositoryDirectory "Install npm dependencies" $script:Executables.npm @($npmAction, "--prefix", $script:RepositoryDirectory, "--no-audit", "--no-fund")
+    }
 
     Set-InstallStage "validate and build monorepo"
-    foreach ($command in @("format:check", "typecheck", "lint")) { Invoke-PlannedExternal $script:RepositoryDirectory "npm.cmd run $command" $script:Executables.npm @("run", $command, "--prefix", $script:RepositoryDirectory) }
-    if (-not $SkipTests) { Invoke-PlannedExternal $script:RepositoryDirectory "npm.cmd run test" $script:Executables.npm @("run", "test", "--prefix", $script:RepositoryDirectory) }
-    Invoke-PlannedExternal $script:RepositoryDirectory "npm.cmd run build" $script:Executables.npm @("run", "build", "--prefix", $script:RepositoryDirectory)
-    if (-not $WhatIfPreference) { $script:BuildSucceeded = $true }
+    $headCommit = if ($WhatIfPreference) { "whatif" } else { (Invoke-External $script:Executables.git @("-C", $script:RepositoryDirectory, "rev-parse", "HEAD") "git rev-parse" -Capture | Select-Object -Last 1).Trim() }
+    $artifactsCurrent = -not $Force -and $Mode -eq "quick" -and -not $script:RepositoryChanged -and
+        $state.artifactsComplete -eq $true -and $state.commit -eq $headCommit -and (Test-RequiredArtifacts)
+    if ($Mode -eq "full") {
+        foreach ($command in @("format:check", "typecheck", "lint")) { Invoke-PlannedExternal $script:RepositoryDirectory "Run $command" $script:Executables.npm @("run", $command, "--prefix", $script:RepositoryDirectory) }
+        if (-not $SkipTests) { Invoke-PlannedExternal $script:RepositoryDirectory "Run unit tests" $script:Executables.npm @("run", "test", "--prefix", $script:RepositoryDirectory) }
+        Invoke-PlannedExternal $script:RepositoryDirectory "Build monorepo" $script:Executables.npm @("run", "build", "--prefix", $script:RepositoryDirectory)
+    } elseif ($artifactsCurrent) {
+        Write-InstallLog INFO "Runtime and extension artifacts match the current commit; build skipped"
+    } else {
+        Invoke-PlannedExternal $script:RepositoryDirectory "Build runtime and direct dependencies" $script:Executables.npm @("--prefix", $script:RepositoryDirectory, "exec", "tsc", "--", "-b", "apps/agent-runtime", "--pretty", "false")
+        Invoke-PlannedExternal $script:RepositoryDirectory "Build VS Code extension" $script:Executables.npm @("run", "build", "--workspace", "apps/vscode-extension", "--prefix", $script:RepositoryDirectory)
+    }
+    if (-not $WhatIfPreference) { $script:BuildSucceeded = Test-RequiredArtifacts }
 
     Set-InstallStage "build VS Code VSIX"
     $buildStart = Get-Date
-    Invoke-PlannedExternal $script:RepositoryDirectory "npm.cmd run package:vsix --workspace apps/vscode-extension" $script:Executables.npm @("run", "package:vsix", "--workspace", "apps/vscode-extension", "--prefix", $script:RepositoryDirectory)
+    $existingVsix = Get-ChildItem -LiteralPath (Join-Path $script:RepositoryDirectory "artifacts") -Filter "*.vsix" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+    if ($artifactsCurrent -and $existingVsix) {
+        $script:VsixPath = $existingVsix
+        Write-InstallLog INFO "Current VSIX artifact reused"
+    } else {
+        $packageScript = if ($Mode -eq "quick") { "package:vsix:no-build" } else { "package:vsix" }
+        Invoke-PlannedExternal $script:RepositoryDirectory "Package VS Code extension" $script:Executables.npm @("run", $packageScript, "--workspace", "apps/vscode-extension", "--prefix", $script:RepositoryDirectory)
+    }
     if (-not $WhatIfPreference) {
-        $script:VsixPath = Get-ChildItem -LiteralPath (Join-Path $script:RepositoryDirectory "artifacts") -Filter "*.vsix" -File | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-        if (-not $script:VsixPath -or $script:VsixPath.Length -le 0 -or $script:VsixPath.LastWriteTime -lt $buildStart.AddSeconds(-2)) { throw "A non-empty VSIX created or updated by this installation was not found." }
+        if (-not $script:VsixPath) { $script:VsixPath = Get-ChildItem -LiteralPath (Join-Path $script:RepositoryDirectory "artifacts") -Filter "*.vsix" -File | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1 }
+        if (-not $script:VsixPath -or $script:VsixPath.Length -le 0) { throw "A non-empty VSIX was not found." }
         Write-InstallLog INFO "Generated VSIX path: $($script:VsixPath.FullName)"
     }
 
@@ -346,7 +442,7 @@ try {
     } else { Write-InstallLog INFO "VS Code configuration skipped by request" }
 
     Set-InstallStage "run project diagnostics"
-    if (-not $SkipDoctor) {
+    if (-not $SkipDoctor -and $Mode -eq "full") {
         Invoke-PlannedExternal $script:RepositoryDirectory "npm.cmd run agent -- doctor" $script:Executables.npm @("run", "agent", "--prefix", $script:RepositoryDirectory, "--", "doctor")
         if (-not $WhatIfPreference) { $script:DoctorSucceeded = $true }
     }
@@ -363,8 +459,9 @@ try {
         if (-not ($extensions | Where-Object { $_ -match ('^' + [Regex]::Escape($extensionId) + '@') })) { throw "Extension '$extensionId' is not listed by VS Code." }
         if (-not (Test-OllamaReady)) { throw "Ollama API final verification failed." }
         if ($Model -notin (Get-InstalledModels)) { throw "Configured model '$Model' is not listed by Ollama." }
-        if (-not $SkipDoctor -and -not $script:DoctorSucceeded) { throw "Doctor final verification failed." }
-        Write-InstallLog INFO "Final verification passed: Git, Node, npm, build, VSIX, extension, Ollama, model$(if (-not $SkipDoctor) { ', doctor' })"
+        if (-not $SkipDoctor -and $Mode -eq "full" -and -not $script:DoctorSucceeded) { throw "Doctor final verification failed." }
+        Save-InstallerState $lockHash $headCommit $true $true
+        Write-InstallLog INFO "Final verification passed: Git, Node, npm, build, VSIX, extension, Ollama, model$(if (-not $SkipDoctor -and $Mode -eq 'full') { ', doctor' })"
     } else { Write-InstallLog INFO "WhatIf: would verify every enabled final-state check" }
 
     Set-InstallStage "optionally open VS Code"

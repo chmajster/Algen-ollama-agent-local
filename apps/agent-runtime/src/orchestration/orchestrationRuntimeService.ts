@@ -110,10 +110,13 @@ export class OrchestrationRuntimeService {
       respectGitignore: config.respectGitignore,
       allowSensitiveFiles: config.allowSensitiveFiles,
     });
-    const [info, files] = await Promise.all([
-      workspace.getWorkspaceInfo(),
-      workspace.listFiles({ path: ".", recursive: true, maxDepth: 4, includeDirectories: false }),
-    ]);
+    const info = await workspace.getWorkspaceInfo();
+    const files = await workspace.listFiles({
+      path: ".",
+      recursive: false,
+      maxDepth: 1,
+      includeDirectories: false,
+    });
     return new OrchestrationRuntimeService(
       config,
       workspace,

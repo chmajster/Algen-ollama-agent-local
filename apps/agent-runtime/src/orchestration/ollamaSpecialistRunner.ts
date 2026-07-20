@@ -146,7 +146,15 @@ export class OllamaSpecialistRunner implements SpecialistModelRunner {
       .filter((definition): definition is OllamaToolDefinition => definition !== undefined);
     let toolCalls = 0;
     let commands = 0;
-    for (let step = 1; step <= request.task.budget.maxSteps; step += 1) {
+    const maxSteps = Math.min(request.task.budget.maxSteps, this.config.maxModelCalls);
+    for (let step = 1; step <= maxSteps; step += 1) {
+      while (
+        messages.length > 4 &&
+        messages.reduce((sum, message) => sum + message.content.length, 0) >
+          this.config.contextLength * 4
+      ) {
+        messages.splice(2, 1);
+      }
       const response = await client.chat({
         messages,
         tools,

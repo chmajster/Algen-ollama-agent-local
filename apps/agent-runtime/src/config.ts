@@ -9,14 +9,29 @@ import { WorkspaceAccessError, WorkspaceNotFoundError } from "@local-code-agent/
 import { ConfigurationError } from "./errors.js";
 
 const DEFAULT_CONFIG = {
+  profile: "low-resource" as const,
+  maxParallelAgents: 1,
+  maxParallelProcesses: 1,
+  maxAgentSteps: 12,
+  maxModelCalls: 8,
+  maxFilesPerTask: 30,
+  maxFileSizeKb: 512,
+  maxCommandOutputKb: 256,
+  workspaceIndexing: "incremental" as const,
+  runFormatCheckOnInstall: false,
+  runTestsOnInstall: false,
+  ollamaKeepAlive: "3m",
+  maxLoadedModels: 1,
+  ollamaMaxResponseTokens: 1_024,
+  maxTaskDurationMs: 600_000,
   ollamaHost: "http://127.0.0.1:11434",
   ollamaModel: "qwen3.5:9b",
-  maxSteps: 20,
-  contextLength: 32_768,
+  maxSteps: 12,
+  contextLength: 8_192,
   temperature: 0.1,
   debug: false,
   workspace: ".",
-  maxFileSizeBytes: 1_048_576,
+  maxFileSizeBytes: 524_288,
   maxReadLines: 1_000,
   maxSearchResults: 100,
   maxDirectoryDepth: 12,
@@ -46,7 +61,7 @@ const DEFAULT_CONFIG = {
   buildTimeoutMs: 300_000,
   maxCommandOutputChars: 100_000,
   maxCommandOutputLines: 5_000,
-  maxCommandOutputBytes: 1_048_576,
+  maxCommandOutputBytes: 262_144,
   maxCommandsPerSession: 30,
   maxParallelCommands: 1,
   allowNetwork: false,
@@ -78,25 +93,25 @@ const DEFAULT_CONFIG = {
   orchestrationEnabled: true,
   orchestrationModelDefault: "qwen3.5:9b",
   orchestrationModelPlanner: "qwen3.5:9b",
-  orchestrationModelExplorer: "qwen2.5-coder:14b",
+  orchestrationModelExplorer: "qwen3.5:9b",
   orchestrationModelArchitect: "qwen3.5:9b",
-  orchestrationModelImplementation: "qwen2.5-coder:14b",
-  orchestrationModelTest: "qwen2.5-coder:14b",
+  orchestrationModelImplementation: "qwen3.5:9b",
+  orchestrationModelTest: "qwen3.5:9b",
   orchestrationModelReview: "qwen3.5:9b",
   orchestrationModelSecurity: "qwen3.5:9b",
   orchestrationModelPerformance: "qwen3.5:9b",
   orchestrationModelDocumentation: "qwen3.5:9b",
   orchestrationMaxAgents: 8,
-  orchestrationMaxParallelAgents: 3,
+  orchestrationMaxParallelAgents: 1,
   orchestrationMaxSubtasks: 30,
   orchestrationMaxDepth: 2,
-  orchestrationMaxTotalSteps: 200,
-  orchestrationMaxTotalToolCalls: 400,
-  orchestrationMaxTotalCommands: 100,
-  orchestrationMaxTotalDurationMs: 7_200_000,
-  orchestrationMaxTotalContextTokens: 200_000,
-  orchestrationMaxAgentContextTokens: 24_000,
-  orchestrationMaxAgentOutputChars: 50_000,
+  orchestrationMaxTotalSteps: 8,
+  orchestrationMaxTotalToolCalls: 32,
+  orchestrationMaxTotalCommands: 12,
+  orchestrationMaxTotalDurationMs: 600_000,
+  orchestrationMaxTotalContextTokens: 32_768,
+  orchestrationMaxAgentContextTokens: 8_192,
+  orchestrationMaxAgentOutputChars: 16_384,
   orchestrationRequirePlanApproval: true,
   orchestrationRequireFinalApproval: true,
   orchestrationRequireReview: true,
@@ -136,6 +151,32 @@ const DEFAULT_CONFIG = {
   githubCiMaxWaitMs: 1_800_000,
 };
 
+const PROFILE_OVERRIDES = {
+  "low-resource": {},
+  balanced: {
+    maxSteps: 20,
+    contextLength: 16_384,
+    maxFileSizeBytes: 1_048_576,
+    maxCommandOutputBytes: 524_288,
+    maxParallelCommands: 2,
+    orchestrationMaxParallelAgents: 2,
+    maxParallelAgents: 2,
+    maxParallelProcesses: 2,
+    maxAgentSteps: 20,
+    maxModelCalls: 16,
+    maxFilesPerTask: 60,
+    maxFileSizeKb: 1_024,
+    maxCommandOutputKb: 512,
+    ollamaKeepAlive: "5m",
+    orchestrationMaxTotalSteps: 32,
+    orchestrationMaxTotalToolCalls: 96,
+    orchestrationMaxTotalCommands: 30,
+    orchestrationMaxTotalDurationMs: 1_800_000,
+    orchestrationMaxTotalContextTokens: 100_000,
+    orchestrationMaxAgentContextTokens: 16_384,
+  },
+} as const;
+
 function booleanValue(value: unknown): unknown {
   if (typeof value !== "string") {
     return value;
@@ -154,6 +195,21 @@ function booleanValue(value: unknown): unknown {
 
 const configSchema = z
   .object({
+    profile: z.enum(["low-resource", "balanced"]),
+    maxParallelAgents: z.coerce.number().int().min(1).max(16),
+    maxParallelProcesses: z.coerce.number().int().min(1).max(16),
+    maxAgentSteps: z.coerce.number().int().min(1).max(1_000),
+    maxModelCalls: z.coerce.number().int().min(1).max(1_000),
+    maxFilesPerTask: z.coerce.number().int().min(1).max(10_000),
+    maxFileSizeKb: z.coerce.number().int().min(1).max(1_048_576),
+    maxCommandOutputKb: z.coerce.number().int().min(1).max(100_000),
+    workspaceIndexing: z.enum(["incremental", "disabled"]),
+    runFormatCheckOnInstall: z.preprocess(booleanValue, z.boolean()),
+    runTestsOnInstall: z.preprocess(booleanValue, z.boolean()),
+    ollamaKeepAlive: z.string().regex(/^(?:0|\d+[smh])$/u),
+    maxLoadedModels: z.coerce.number().int().min(1).max(4),
+    ollamaMaxResponseTokens: z.coerce.number().int().min(1).max(32_768),
+    maxTaskDurationMs: z.coerce.number().int().min(1_000).max(86_400_000),
     ollamaHost: z
       .url("musi być poprawnym adresem URL")
       .refine((value) => value.startsWith("http://") || value.startsWith("https://"), {
@@ -293,6 +349,19 @@ export interface LoadConfigOptions {
 function environmentOverrides(env: NodeJS.ProcessEnv): Partial<Record<keyof AgentConfig, unknown>> {
   const result: Partial<Record<keyof AgentConfig, unknown>> = {};
   const mappings: ReadonlyArray<[keyof AgentConfig, string]> = [
+    ["profile", "AGENT_PROFILE"],
+    ["maxParallelAgents", "AGENT_MAX_PARALLEL_AGENTS"],
+    ["maxParallelProcesses", "AGENT_MAX_PARALLEL_PROCESSES"],
+    ["maxAgentSteps", "AGENT_MAX_AGENT_STEPS"],
+    ["maxModelCalls", "AGENT_MAX_MODEL_CALLS"],
+    ["maxFilesPerTask", "AGENT_MAX_FILES_PER_TASK"],
+    ["maxFileSizeKb", "AGENT_MAX_FILE_SIZE_KB"],
+    ["maxCommandOutputKb", "AGENT_MAX_COMMAND_OUTPUT_KB"],
+    ["workspaceIndexing", "AGENT_WORKSPACE_INDEXING"],
+    ["ollamaKeepAlive", "OLLAMA_KEEP_ALIVE"],
+    ["maxLoadedModels", "OLLAMA_MAX_LOADED_MODELS"],
+    ["ollamaMaxResponseTokens", "OLLAMA_MAX_RESPONSE_TOKENS"],
+    ["maxTaskDurationMs", "AGENT_MAX_TASK_DURATION_MS"],
     ["ollamaHost", "OLLAMA_HOST"],
     ["ollamaModel", "OLLAMA_MODEL"],
     ["maxSteps", "AGENT_MAX_STEPS"],
@@ -444,8 +513,15 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Agent
     throw new ConfigurationError(`Plik ${configPath} musi zawierać obiekt JSON.`);
   }
 
+  const fileRecord = fromFile as Record<string, unknown>;
+  const requestedProfile =
+    options.overrides?.profile ?? env.AGENT_PROFILE ?? fileRecord.profile ?? DEFAULT_CONFIG.profile;
+  const profileOverrides =
+    requestedProfile === "balanced" ? PROFILE_OVERRIDES.balanced : PROFILE_OVERRIDES["low-resource"];
+
   const parsed = configSchema.safeParse({
     ...DEFAULT_CONFIG,
+    ...profileOverrides,
     ...fromFile,
     ...environmentOverrides(env),
     ...options.overrides,
@@ -489,7 +565,10 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Agent
     });
   }
 
-  return { ...parsed.data, workspace: canonicalWorkspace };
+  return {
+    ...parsed.data,
+    workspace: canonicalWorkspace,
+  };
 }
 
 export function isDebugRequested(env: NodeJS.ProcessEnv = process.env): boolean {

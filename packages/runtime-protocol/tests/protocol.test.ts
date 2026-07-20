@@ -39,6 +39,7 @@ const task = {
 const settings = {
   ollamaHost: "http://127.0.0.1:11434",
   ollamaModel: "qwen3.5:9b",
+  ollamaKeepAlive: "3m",
   maxSteps: 20,
   contextLength: 32_768,
   temperature: 0.1,

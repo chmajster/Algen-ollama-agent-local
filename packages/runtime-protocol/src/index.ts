@@ -307,6 +307,7 @@ export const runtimeSettingsSchema = z
   .object({
     ollamaHost: z.string().url(),
     ollamaModel: z.string().trim().min(1),
+    ollamaKeepAlive: z.string().regex(/^(?:0|\d+[smh])$/u),
     maxSteps: z.number().int().min(1).max(1_000),
     contextLength: z.number().int().min(1_024).max(2_000_000),
     temperature: z.number().min(0).max(2),

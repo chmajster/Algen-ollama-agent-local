@@ -19,6 +19,10 @@ export interface AgentLoopObserver {
 
 export interface AgentLoopConfiguration {
   defaultMaxSteps: number;
+  maxModelCalls?: number;
+  maxFilesPerTask?: number;
+  maxContextChars?: number;
+  maxTaskDurationMs?: number;
   maxToolResultChars?: number;
   debug?: boolean;
   logger?: (message: string) => void;

@@ -790,6 +790,10 @@ export async function runCli(args: readonly string[] = process.argv.slice(2)): P
       createRegistry(workspace, changes, runner, verifier, coordinator, config),
       {
         defaultMaxSteps: config.maxSteps,
+        maxModelCalls: config.maxModelCalls,
+        maxFilesPerTask: config.maxFilesPerTask,
+        maxContextChars: config.contextLength * 4,
+        maxTaskDurationMs: config.maxTaskDurationMs,
         maxToolResultChars: config.maxToolResultChars,
         debug: config.debug,
         changeSession: () => changes.getSessionSnapshot(),

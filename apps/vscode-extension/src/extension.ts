@@ -128,7 +128,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     githubAuthentication,
     controller,
     vscode.window.registerWebviewViewProvider("localCodeAgent.chat", view, {
-      webviewOptions: { retainContextWhenHidden: true },
+      webviewOptions: { retainContextWhenHidden: false },
     }),
     vscode.workspace.registerTextDocumentContentProvider("agent-original", diffProvider),
     vscode.workspace.registerTextDocumentContentProvider("agent-modified", diffProvider),

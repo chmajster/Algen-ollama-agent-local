@@ -235,6 +235,14 @@ function debugArguments(value: unknown): string {
   }
 }
 
+function trimHistory(history: AgentMessage[], maxChars: number): void {
+  let total = history.reduce((sum, message) => sum + message.content.length, 0);
+  while (history.length > 4 && total > maxChars) {
+    const removed = history.splice(2, 1)[0];
+    if (removed !== undefined) total -= removed.content.length;
+  }
+}
+
 function recordToolSuccess(toolName: string, value: unknown, metrics: RunMetrics): void {
   if (!isRecord(value)) return;
   if (toolName === "read_file" || toolName === "read_file_range") {
@@ -385,7 +393,10 @@ export class AgentLoop {
       };
     };
 
-    const maxSteps = options.maxSteps ?? this.configuration.defaultMaxSteps;
+    const maxSteps = Math.min(
+      options.maxSteps ?? this.configuration.defaultMaxSteps,
+      this.configuration.maxModelCalls ?? Number.POSITIVE_INFINITY,
+    );
     const maxToolResultChars = this.configuration.maxToolResultChars ?? 50_000;
     const task = options.task.trim();
     if (task === "") {
@@ -406,6 +417,28 @@ export class AgentLoop {
     let toolCalls = 0;
 
     for (let step = 1; step <= maxSteps; step += 1) {
+      if (
+        this.configuration.maxTaskDurationMs !== undefined &&
+        performance.now() - startedAt >= this.configuration.maxTaskDurationMs
+      ) {
+        return finish({
+          answer: "Zadanie przekroczyĹ‚o skonfigurowany limit czasu.",
+          steps: step - 1,
+          toolCalls,
+          finishReason: "error",
+        });
+      }
+      if (
+        this.configuration.maxFilesPerTask !== undefined &&
+        metrics.uniqueFilesAccessed.size >= this.configuration.maxFilesPerTask
+      ) {
+        return finish({
+          answer: "OsiÄ…gniÄ™to limit plikĂłw odczytanych w tym zadaniu.",
+          steps: step - 1,
+          toolCalls,
+          finishReason: "error",
+        });
+      }
       if (isSignalAborted(options.signal)) {
         this.debug(`przerwano przed krokiem ${step}`);
         return finish({
@@ -418,6 +451,7 @@ export class AgentLoop {
 
       this.debug(`krok ${step}/${maxSteps}`);
       try {
+        trimHistory(history, this.configuration.maxContextChars ?? 32_768);
         const response = await this.client.chat({
           messages: history,
           tools: this.tools.getDefinitions(),

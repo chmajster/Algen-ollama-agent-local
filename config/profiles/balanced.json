@@ -1,0 +1,15 @@
+{
+  "profile": "balanced",
+  "maxParallelAgents": 2,
+  "maxParallelProcesses": 2,
+  "maxAgentSteps": 20,
+  "maxModelCalls": 16,
+  "maxFilesPerTask": 60,
+  "maxFileSizeKb": 1024,
+  "maxCommandOutputKb": 512,
+  "workspaceIndexing": "incremental",
+  "runFormatCheckOnInstall": false,
+  "runTestsOnInstall": false,
+  "ollamaKeepAlive": "5m",
+  "maxLoadedModels": 1
+}

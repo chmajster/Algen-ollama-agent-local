@@ -121,7 +121,37 @@ function toOllamaTool(definition: OllamaToolDefinition): Tool {
 }
 
 export class OllamaClient implements AgentModelClient {
+  private static modelQueue: Promise<void> = Promise.resolve();
+  private static activeModel: string | undefined;
+
   public constructor(private readonly config: AgentConfig) {}
+
+  private async withModelSlot<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = OllamaClient.modelQueue;
+    let release!: () => void;
+    OllamaClient.modelQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      if (
+        this.config.maxLoadedModels === 1 &&
+        OllamaClient.activeModel !== undefined &&
+        OllamaClient.activeModel !== this.config.ollamaModel
+      ) {
+        await this.createClient().generate({
+          model: OllamaClient.activeModel,
+          prompt: "",
+          stream: false,
+          keep_alive: 0,
+        });
+      }
+      OllamaClient.activeModel = this.config.ollamaModel;
+      return await operation();
+    } finally {
+      release();
+    }
+  }
 
   private createClient(signal?: AbortSignal): Ollama {
     const abortableFetch = createAbortableFetch(signal);
@@ -152,16 +182,22 @@ export class OllamaClient implements AgentModelClient {
 
   public async chat(request: ModelChatRequest): Promise<ModelChatResponse> {
     try {
-      const response = await this.createClient(request.signal).chat({
-        model: this.config.ollamaModel,
-        messages: request.messages.map(toOllamaMessage),
-        tools: request.tools.map(toOllamaTool),
-        stream: false,
-        options: {
-          temperature: this.config.temperature,
-          num_ctx: this.config.contextLength,
-        },
-      });
+      const response = await this.withModelSlot(() =>
+        this.createClient(request.signal).chat({
+          model: this.config.ollamaModel,
+          messages: request.messages.map(toOllamaMessage),
+          tools: request.tools.map(toOllamaTool),
+          stream: false,
+          think: false,
+          keep_alive: this.config.ollamaKeepAlive,
+          options: {
+            temperature: this.config.temperature,
+            num_ctx: this.config.contextLength,
+            num_predict: this.config.ollamaMaxResponseTokens,
+            num_batch: 1,
+          },
+        }),
+      );
 
       return { message: fromOllamaMessage(response.message) };
     } catch (error: unknown) {

@@ -30,6 +30,9 @@ export class NodeProcessLauncher implements ProcessLauncher {
         ...process.env,
         ELECTRON_RUN_AS_NODE: "1",
         AGENT_RUNTIME_SESSION_ID: options.sessionId,
+        NODE_OPTIONS: process.env.ALGEN_NODE_OPTIONS ?? "--max-old-space-size=1024",
+        OLLAMA_NUM_PARALLEL: process.env.OLLAMA_NUM_PARALLEL ?? "1",
+        OLLAMA_MAX_LOADED_MODELS: process.env.OLLAMA_MAX_LOADED_MODELS ?? "1",
       },
     });
     return child as unknown as RuntimeProcess;

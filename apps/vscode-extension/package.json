@@ -32,7 +32,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.test.json --noEmit --pretty false",
     "test": "vitest run",
     "vscode:test": "npm run build && tsx tests/integration/runTest.ts",
-    "package:vsix": "node -e \"require('node:fs').mkdirSync('../../artifacts',{recursive:true})\" && npm run build && vsce package --allow-missing-repository --no-dependencies --out ../../artifacts/local-code-agent-0.2.0.vsix"
+    "package:vsix": "node -e \"require('node:fs').mkdirSync('../../artifacts',{recursive:true})\" && npm run build && vsce package --allow-missing-repository --no-dependencies --out ../../artifacts/local-code-agent-0.2.0.vsix",
+    "package:vsix:no-build": "node -e \"require('node:fs').mkdirSync('../../artifacts',{recursive:true})\" && vsce package --allow-missing-repository --no-dependencies --out ../../artifacts/local-code-agent-0.2.0.vsix"
   },
   "dependencies": {
     "@local-code-agent/runtime-protocol": "*",
@@ -326,9 +327,15 @@
         },
         "localCodeAgent.ollama.contextLength": {
           "type": "number",
-          "default": 32768,
+          "default": 8192,
           "minimum": 1024,
           "maximum": 2000000
+        },
+        "localCodeAgent.ollama.keepAlive": {
+          "type": "string",
+          "default": "3m",
+          "pattern": "^(0|[0-9]+[smh])$",
+          "description": "Czas utrzymywania modelu w RAM/VRAM po ostatnim ĹĽÄ…daniu."
         },
         "localCodeAgent.ollama.temperature": {
           "type": "number",
@@ -467,7 +474,7 @@
         },
         "localCodeAgent.orchestration.maxParallelAgents": {
           "type": "number",
-          "default": 3,
+          "default": 1,
           "minimum": 1,
           "maximum": 16
         },

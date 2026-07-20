@@ -79,6 +79,12 @@ interface TreeNode {
   children: Map<string, TreeNode>;
 }
 
+interface CachedTextFile {
+  size: number;
+  modifiedMs: number;
+  result: TextFileResult;
+}
+
 const BINARY_MESSAGE = "Plik binarny nie może zostać odczytany jako tekst.";
 
 function normalizeExtensions(extensions?: string[]): Set<string> | undefined {
@@ -194,6 +200,8 @@ function assertGlobIsSafe(pattern: string): void {
 }
 
 export class LocalWorkspaceService implements WorkspaceService {
+  private readonly textFileCache = new Map<string, CachedTextFile>();
+
   private constructor(
     private readonly options: WorkspaceServiceOptions,
     private readonly paths: PathSecurity,
@@ -469,6 +477,15 @@ export class LocalWorkspaceService implements WorkspaceService {
       );
     }
 
+    const cached = this.textFileCache.get(resolved.relativePath);
+    if (
+      cached !== undefined &&
+      cached.size === fileStats.size &&
+      cached.modifiedMs === fileStats.mtimeMs
+    ) {
+      return { ...cached.result };
+    }
+
     const bytes = await readFileFromDisk(resolved.realPath);
     const text = decodeUtf8(bytes, resolved.relativePath);
     const lines = splitText(text);
@@ -486,7 +503,17 @@ export class LocalWorkspaceService implements WorkspaceService {
       truncated: selectedLines.length < lines.length,
       content: selectedLines.map((line) => line.raw).join(""),
     };
-    return result;
+    this.textFileCache.delete(resolved.relativePath);
+    this.textFileCache.set(resolved.relativePath, {
+      size: fileStats.size,
+      modifiedMs: fileStats.mtimeMs,
+      result,
+    });
+    if (this.textFileCache.size > 32) {
+      const oldest = this.textFileCache.keys().next().value as string | undefined;
+      if (oldest !== undefined) this.textFileCache.delete(oldest);
+    }
+    return { ...result };
   }
 
   public async readFileRange(options: ReadFileRangeOptions): Promise<ReadFileRangeResult> {

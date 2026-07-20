@@ -34,8 +34,11 @@ describe("loadConfig", () => {
     expect(result).toMatchObject({
       ollamaHost: "http://127.0.0.1:11434",
       ollamaModel: "test-model:1b",
+      profile: "low-resource",
+      maxParallelAgents: 1,
+      maxModelCalls: 8,
       maxSteps: 7,
-      contextLength: 32_768,
+      contextLength: 8_192,
       temperature: 0.1,
       debug: false,
       accessMode: "preview",
@@ -52,6 +55,40 @@ describe("loadConfig", () => {
       verifyAfterApply: true,
       rollbackOnVerificationFailure: false,
       verificationScope: "affected_packages",
+    });
+  });
+
+  it("stosuje domyĹ›lny profil niskiego zuĹĽycia zasobĂłw", async () => {
+    const path = await configFile({});
+    const result = await loadConfig({ configPath: path, env: {} });
+
+    expect(result).toMatchObject({
+      profile: "low-resource",
+      maxParallelAgents: 1,
+      maxParallelProcesses: 1,
+      maxAgentSteps: 12,
+      maxModelCalls: 8,
+      maxFilesPerTask: 30,
+      maxFileSizeBytes: 512 * 1_024,
+      maxCommandOutputBytes: 256 * 1_024,
+      workspaceIndexing: "incremental",
+      ollamaKeepAlive: "3m",
+      maxLoadedModels: 1,
+      orchestrationMaxParallelAgents: 1,
+    });
+  });
+
+  it("udostÄ™pnia profil balanced bez zmiany profilu domyĹ›lnego", async () => {
+    const path = await configFile({ profile: "balanced" });
+    const result = await loadConfig({ configPath: path, env: {} });
+
+    expect(result).toMatchObject({
+      profile: "balanced",
+      maxParallelAgents: 2,
+      maxParallelProcesses: 2,
+      maxModelCalls: 16,
+      contextLength: 16_384,
+      orchestrationMaxParallelAgents: 2,
     });
   });
 
